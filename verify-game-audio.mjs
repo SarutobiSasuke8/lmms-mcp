@@ -170,6 +170,14 @@ try {
   assert.equal(arranged.tracks.find(t => t.name === 'Hat').clips.length, 2);
   assert.equal(arranged.mixer.find(bus => bus.name === 'Drums').gain, 0.8);
   assert.equal(arranged.tracks.at(-1).role, 'length pin');
+  await call('apply_edits', { project: 'arranged.mmp', output: 'roles.mmp', edits: [
+    { op: 'set_track_role', args: { trackName: 'Lead', role: 'lead' } },
+    { op: 'add_track', args: { track: { name: 'Shaker', voice: 'hat', role: 'drums', volume: 20, patterns: [{ name: 'S', bar: 0, bars: 1, steps: { grid: 'x-x-' } }] } } },
+  ] });
+  const roles = Object.fromEntries((await call('inspect_arrangement', { project: 'roles.mmp' })).tracks.map(t => [t.name, t.role]));
+  assert.equal(roles.Lead, 'lead');
+  assert.equal(roles.Shaker, 'drums');
+  assert.ok(Array.isArray((await call('get_started')).moduleGuidance));
   step('add_track, add_pattern, copy_bars, remove_track, set_song_length and mixer edits');
 
   // 9. Game export: intro, loop, layers that sum to the mix, a stinger and a manifest.
