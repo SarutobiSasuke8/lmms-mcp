@@ -1,5 +1,9 @@
 # LMMS MCP comparison
 
+## Live parameter writes on Ninja Bomber
+
+On Windows with LMMS 1.2.2 and Jx9x `5e6f57b`, both MCPs wrote the same two native controls on a disposable copy of the Ninja Bomber arp arrangement. The LMMS filter cutoff went from 3400 to 1350 Hz and Delay feedback went from 35% to 65%. Each path started from the same values, returned identical readback and produced identical saved MMP content. Independently rendered WAVs differed at the PCM level. Our adapter rejected a stale project token and the bridge rejected an out-of-range batch without applying the valid entry. This verifies the shared bridge's native write path for these controls.
+
 14 November 2026. Windows x64, Node.js 22, Python 3.12 and stock LMMS 1.2.2. The project was a disposable copy of Fuse Run Club with 6 instrument tracks, 2 mixer buses and 2 automation lanes.
 
 | Check | This server 0.3.0 | ZipseLu e57d9fe | Jx9x 5e6f57b |
