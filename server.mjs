@@ -1523,7 +1523,7 @@ const toolContext = {
   music: { expandPattern, parseChord, voiceChord, bassNote, chordQualities },
   sounds: { soundFacts, listPresets, listZynPresets, effectTypes },
 };
-const toolModules = (await readdir(new URL('./tools/', import.meta.url)).catch(() => [])).filter(name => name.endsWith('.mjs')).sort();
+const toolModules = (await readdir(new URL('./tools/', import.meta.url)).catch(() => [])).filter(name => name.endsWith('.mjs') && !name.endsWith('.test.mjs')).sort();
 for (const file of toolModules) await (await import(new URL('./tools/' + file, import.meta.url))).register(toolContext);
 tool('apply_edits', 'Apply many edits to one project and save once. Use this for mixing passes and arrangement changes instead of one file per change. If any edit fails, nothing is written. Ops: ' + Object.keys(edits).join(', ') + '. Each edit takes the same arguments as the tool of that name, without project and output.', {
   project: projectName, output: projectName,
