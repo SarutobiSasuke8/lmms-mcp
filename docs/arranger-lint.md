@@ -38,9 +38,9 @@ The score starts at 100. Each finding costs 15 points for an error, 5 for a warn
   "warnings": ["ERROR melody.competing: Up to 4 independent melodies play at once in bars 0-3 (...). Fix: Pick one lead ..."] }
 ```
 
-At most eight findings are listed, then a pointer to `lint_arrangement`. These checks never block on their own. Pass `strict: true` to any of those four tools to stop with an error, writing nothing, when the arrangement has errors. A clean arrangement adds no field at all.
+The field appears only when the lint finds an error or a warning. Missing roles on their own are reported by `lint_arrangement`, not on every save; when the field does appear it also lists tracks without a role. At most eight findings are listed, then a pointer to `lint_arrangement`. These checks never block on their own. Pass `strict: true` to any of those four tools to stop with an error, writing nothing, when the arrangement has errors.
 
-The server keeps two hook lists for this, `postSave` and `exportChecks`, in the module context. A check is `async (doc, { project }) => null | { summary, blocking, warnings }`; a check that throws is reported as a warning and never breaks the tool.
+The server keeps two hook lists for this, `postSave` and `exportChecks`, in the module context. See `tools/README.md` for the contract. A check that throws is reported as a non-blocking warning and the save goes ahead, even with `strict`.
 
 ## Roles
 
@@ -51,11 +51,14 @@ Every track should declare a role: drums, bass, harmony, lead, counter, texture 
 | A sample track (or one with only notes of a sixteenth or shorter) using three or fewer pitches | drums |
 | Half or more of its onsets are chords | harmony |
 | Median pitch below MIDI 48 (C3) | bass |
-| A melodic line (see below) in at least 30% of the bars where it plays | lead, or counter when a lead is declared or a higher melodic track exists |
+| A melodic line (see below) in at least 30% of the bars where it plays, when it is the lowest pitched track, its median is below MIDI 55 (G3) and no bass is declared or inferred | bass (a walking bass in the tenor register) |
+| Any other melodic line | lead, or counter when a lead is declared or a higher melodic track exists |
 | Average note length of half a bar or more | harmony |
 | Anything else | texture |
 
 Role limits use declared roles only. The other rules use the declared role, or the inferred one.
+
+A track plays in a bar for the role limits when a note starts in the bar, or a held note covers more than 48 ticks (one beat) of it. A short overhang from the previous bar does not count.
 
 ## Rules and thresholds
 
@@ -63,15 +66,19 @@ Bars count from zero. A bar is 192 ticks in 4/4. "Sounding in a bar" means a not
 
 ### Melodic voice
 
-A track carries a melodic voice in a bar when, in that bar, it has at least 3 onsets, at least 3 different top pitches, at least 75% of its onsets are single notes, its median pitch is MIDI 48 or higher, it is not drums, and it is not a figure. A figure is an arpeggio or ostinato: evenly spaced onsets cycling through four or fewer pitches. Two tracks with the same rhythm and the same melodic contour (a doubling in octaves, thirds or sixths) count as one voice.
+A track carries a melodic voice in a bar when, in that bar, it has at least 3 onsets, at least 3 different top pitches, at least 75% of its onsets are single notes, its median pitch is MIDI 48 or higher, it is not drums, and it is not a figure. A figure is an arpeggio or ostinato with evenly spaced onsets, either cycling with a period of up to 8 notes (at least two full cycles in the bar), or 6 or more onsets on 4 or fewer pitches (a broken chord). Two tracks with the same rhythm and the same melodic contour (a doubling in octaves, thirds or sixths) count as one voice.
+
+Tracks declared drums, bass, harmony or texture, and tracks inferred as bass, never count as melodic voices, however they move: a walking bass or a busy arpeggio supports the melody. Tracks declared lead, counter or fx, and other unroled tracks, are judged by behaviour.
+
+Because of the broken-chord test, an unroled motif that only spells a chord (for example C, Eb and G in even eighths) is inferred as texture. Declare it as lead to have the lead rules check it.
 
 ### Role limits
 
 | Rule | Severity | Fires when |
 | --- | --- | --- |
-| `role.multiple-leads` | error | More than one declared lead sounds in the same bar. |
-| `role.multiple-counters` | warning | More than one declared counter sounds in the same bar. |
-| `role.counter-without-lead` | warning | A declared counter sounds in a bar where no declared lead sounds. |
+| `role.multiple-leads` | error | More than one declared lead plays in the same bar. Leads that double each other (same rhythm and contour, for example in octaves) count as one. |
+| `role.multiple-counters` | warning | More than one declared counter plays in the same bar, with the same doubling rule. |
+| `role.counter-without-lead` | warning | A declared counter plays in a bar with no declared lead playing within 4 bars either side. Call and response, where the counter answers while the lead rests, is fine. |
 | `role.missing` | note | A track with notes has no role. The note names the inferred role. |
 
 ### Competing melodies
@@ -92,8 +99,8 @@ A track carries a melodic voice in a bar when, in that bar, it has at least 3 on
 
 | Rule | Severity | Fires when |
 | --- | --- | --- |
-| `clash.harsh-interval` | warning, or error when it happens on more than 25% of the strong beats the pair shares | Two different pitched tracks sound a minor second or minor ninth (1 or 13 semitones apart) on a strong beat. Strong beats are the first and middle beat of the bar (the first only in odd metres). Drums and fx tracks are skipped. Intervals inside one track are allowed. |
-| `key.out-of-key` | warning above 10% of pitched note time, error above 25% | Notes fall outside the key. Note time is each note's length, capped at one bar. Minor keys allow the raised seventh. Supported modes: major, minor, dorian, phrygian, lydian, mixolydian and harmonic minor. |
+| `clash.harsh-interval` | warning; error only when a pair clashes on at least 4 strong beats and on more than 25% of the strong beats it shares | Two different pitched tracks sound a minor second or minor ninth (1 or 13 semitones apart) on a strong beat. Strong beats are the first and middle beat of the bar (the first only in odd metres). Drums and fx tracks are skipped. Intervals inside one track are allowed. A pitch class that one track already owns is not a clash: for a harmony track that is every pitch class it plays in the bar (so a pad and an arpeggio both spelling Fmaj7 do not clash), for other tracks it is the notes sounding on the beat. |
+| `key.out-of-key` | warning above 10% of pitched note time; error above 25%, only when `key` was given | Notes fall outside the key. Note time is each note's length, capped at one bar. Minor keys allow the raised seventh. Supported modes: major, minor, dorian, phrygian, lydian, mixolydian and harmonic minor. Detection only tries major and minor, so a detected key never blocks: a D dorian vamp reads as D major, and the out-of-key B is a warning. Pass `key` to check a mode properly. |
 | `key.unclear` | note | No key was given and the best detected key scores under 0.5 (Krumhansl-Kessler correlation). The out-of-key check is skipped; pass `key` to run it. |
 
 ### Density
@@ -125,7 +132,7 @@ Each lead's bars with at least 2 onsets are compared. Two bars are alike by half
 
 ## Tuning
 
-The thresholds live in `thresholds` and `scoring` at the top of `tools/arranger-lint.mjs`. They were set so that a simple arrangement (drums, a bass line, pad chords, one lead built from a repeated and varied motif, and a sparse counter) produces no errors and no warnings, and so that none of the built-in `create_composer_sketch` profiles produces an error. Those sketches do get `register.overlap` warnings, because their harmony pad sits inside the range of the motif.
+The thresholds live in `thresholds` and `scoring` at the top of `tools/arranger-lint.mjs`. They were set so that a realistic arrangement (drums, a walking bass in the tenor register, an arpeggiated seventh-chord harmony, a held pad, one lead built from a repeated and varied motif, and a counter line that answers the lead and takes over while it rests) produces no errors and no warnings, with or without declared roles, and so that none of the built-in `create_composer_sketch` profiles produces an error. Those sketches do get `register.overlap` warnings, because their harmony pad sits inside the range of the motif.
 
 ## Limits
 

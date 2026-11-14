@@ -2,7 +2,7 @@
 // Run: node verify-arranger-lint.mjs
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,18 +31,22 @@ async function fails(name, args, pattern) {
 }
 const step = label => console.log('ok', label);
 
-// A sensible game loop in D minor: drums, bass, pad chords, one lead with a varied motif and a sparse counter.
+// A sensible game loop in D minor: drums, a walking bass in the tenor register, an arpeggiated seventh-chord harmony
+// (a six-note cycle), a held pad, one lead with a varied motif that rests in the last bar, and a real counter line that
+// answers the lead and takes over while it rests. Same as cleanSpecs in tools/arranger-lint.test.mjs.
 const leadLine = 'D5:4 F5:2 A5:2 G5:4 F5:4 | D5:4 F5:2 Bb5:2 F5:4 D5:4 | C5:4 F5:2 A5:2 G5:4 F5:4 | ';
 const clean = [
   { name: 'Kick', voice: 'kick', role: 'drums', volume: 60, patterns: [{ name: 'Beat', bar: 0, bars: 8, steps: { grid: 'X-------x-------' } }] },
   { name: 'Hat', voice: 'hat', role: 'drums', volume: 35, patterns: [{ name: 'Beat', bar: 0, bars: 8, steps: { grid: '--x---x---x---x-', length: 12 } }] },
-  { name: 'Bass', voice: 'bass', role: 'bass', volume: 70, patterns: [{ name: 'Line', bar: 0, bars: 8, chords: { progression: 'Dm Bb F C', style: 'bass', figure: 'octaves' } }] },
-  { name: 'Pad', voice: 'pad', role: 'harmony', volume: 40, patterns: [{ name: 'Chords', bar: 0, bars: 8, chords: { progression: 'Dm Bb F C' } }] },
+  { name: 'Bass', voice: 'bass', role: 'bass', volume: 70, patterns: [{ name: 'Walk', bar: 0, bars: 4, melody: { line: 'D3:4 E3:4 F3:4 A3:4 | Bb2:4 C3:4 D3:4 F3:4 | F2:4 G2:4 A2:4 C3:4 | C3:4 D3:4 E3:4 G3:4', repeat: true } }] },
+  { name: 'Arp', voice: 'pluck', role: 'harmony', volume: 30, patterns: [{ name: 'Broken', bar: 0, bars: 8, chords: { progression: 'Dm7 Bbmaj7 Fmaj7 C7', style: 'arp', order: 'updown', rate: 1, octave: 3, voiceLead: false } }] },
+  { name: 'Pad', voice: 'pad', role: 'harmony', volume: 35, patterns: [{ name: 'Held', bar: 0, bars: 8, chords: { progression: 'Dm Bb F C', octave: 4 } }] },
   { name: 'Lead', voice: 'pluck', role: 'lead', volume: 60, patterns: [
     { name: 'A', bar: 0, bars: 4, melody: { line: leadLine + 'E5:4 G5:2 C6:2 G5:4 E5:4' } },
-    { name: 'A2', bar: 4, bars: 4, melody: { line: leadLine + 'E5:4 G5:4 E5:8' } },
+    { name: 'A2', bar: 4, bars: 4, melody: { line: leadLine + 'r:16' } },
   ] },
-  { name: 'Counter', voice: 'pluck', role: 'counter', volume: 35, patterns: [{ name: 'Answer', bar: 0, bars: 8, melody: { line: 'r:16 | r:8 F4:4 D4:4 | r:16 | r:8 G4:4 E4:4' } }] },
+  { name: 'Counter', voice: 'pluck', role: 'counter', volume: 35, patterns: [{ name: 'Answer', bar: 0, bars: 8, melody: {
+    line: 'r:16 | r:8 F4:2 G4:2 A4:2 F4:2 | r:16 | r:8 G4:2 A4:2 G4:2 E4:2 | r:16 | r:8 F4:2 G4:2 A4:2 F4:2 | r:16 | C5:4 Bb4:4 G4:4 E4:4' } }] },
 ];
 // The failure agents produce: four tracks, each with its own busy melody.
 const busy = [
@@ -67,11 +71,22 @@ try {
   assert.equal(cleanLint.counts.error, 0);
   assert.equal(cleanLint.counts.warning, 0, JSON.stringify(cleanLint.findings));
   assert.ok(['D minor', 'F major'].includes(cleanLint.key.name), cleanLint.key.name);
-  assert.deepEqual(cleanLint.roles.map(r => r.role), ['drums', 'drums', 'bass', 'harmony', 'lead', 'counter']);
+  assert.deepEqual(cleanLint.roles.map(r => r.role), ['drums', 'drums', 'bass', 'harmony', 'harmony', 'lead', 'counter']);
+  assert.ok(cleanLint.melodicVoicesPerBar.every(n => n <= 2), 'walking bass and arpeggio are not counted as melodies');
   const givenKey = await call('lint_arrangement', { project: 'clean.mmp', key: 'D minor', strict: true });
   assert.equal(givenKey.pass, true);
   assert.equal(givenKey.key.source, 'given');
   step('clean arrangement: no hook warnings, lint passes with no errors or warnings, strict too');
+
+  // 1b. The same arrangement with no roles: lint notes the missing roles, but saves stay quiet.
+  const unroled = await call('create_project', { output: 'unroled.mmp', bpm: 110, tracks: clean.map(({ role, ...rest }) => rest) });
+  assert.equal(unroled.arrangement, undefined, JSON.stringify(unroled.arrangement));
+  const mixOnly = await call('apply_edits', { project: 'unroled.mmp', output: 'unroled-mix.mmp', edits: [{ op: 'set_track_mix', args: { trackName: 'Lead', volume: 55 } }] });
+  assert.equal(mixOnly.arrangement, undefined);
+  const unroledLint = await call('lint_arrangement', { project: 'unroled.mmp' });
+  assert.equal(unroledLint.counts.error + unroledLint.counts.warning, 0, JSON.stringify(unroledLint.findings));
+  assert.ok(unroledLint.findings.some(f => f.rule === 'role.missing'));
+  step('unroled arrangement: roles noted by lint_arrangement only, no arrangement field on save');
 
   // 2. The busy arrangement: the hook warns without blocking, strict blocks and writes nothing, lint fails clearly.
   const messy = await call('create_project', { output: 'busy.mmp', bpm: 110, tracks: busy });
@@ -106,6 +121,18 @@ try {
   const edited = await call('set_track_mix', { project: 'busy.mmp', output: 'busy-mix.mmp', trackName: 'Lead A', volume: 40 });
   assert.equal(edited.arrangement, undefined, 'only checked edits attach arrangement warnings');
   step('add_track and apply_edits attach arrangement warnings; strict blocks; other edits stay quiet');
+
+  // 3b. A check that throws never stops a save. A zero-beat bar makes the lint fail on this hand-written project.
+  await writeFile(path.join(workspace, 'odd.mmp'), '<?xml version="1.0"?><!DOCTYPE lmms-project><lmms-project version="1.0" creator="LMMS" creatorversion="1.2.2" type="song">' +
+    '<head bpm="120" mastervol="86" timesig_numerator="0" timesig_denominator="4"/><song><trackcontainer type="song">' +
+    '<track muted="0" solo="0" type="0" name="Lead" mcp-role="lead"><instrumenttrack vol="60" pan="0" basenote="57" fxch="0"><instrument name="tripleoscillator"><tripleoscillator/></instrument></instrumenttrack>' +
+    '<pattern name="p" pos="0" len="192" type="1" steps="16" muted="0"><note key="62" pos="0" len="48" vol="100" pan="0"/></pattern></track></trackcontainer></song></lmms-project>');
+  await fails('lint_arrangement', { project: 'odd.mmp' }, /./);
+  const survived = await call('apply_edits', { project: 'odd.mmp', output: 'odd-saved.mmp', strict: true, edits: [{ op: 'set_track_mix', args: { trackName: 'Lead', volume: 50 } }] });
+  assert.match(survived.arrangement.summary, /An arrangement check failed/);
+  assert.equal(survived.arrangement.blocking, false);
+  assert.ok(existsSync(path.join(workspace, 'odd-saved.mmp')));
+  step('a check that throws is reported as a warning and the save still happens, even with strict');
 
   // 4. Quality report with a real render, and the export gate.
   const render = await call('render_mix', { project: 'clean.mmp', output: 'clean.wav' });

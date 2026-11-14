@@ -6,11 +6,13 @@ import path from 'node:path';
 // Every number the rules use. docs/arranger-lint.md explains each one.
 export const thresholds = {
   lineFloorMidi: 48, // median pitch below this is bass register, not a melody
+  inferredBassMedian: 55, // the lowest moving line below this is inferred as bass when no role says otherwise
   melodicMinOnsets: 3, melodicMinPitches: 3, monophonicShare: 0.75,
   maxMelodicVoices: 2,
   overlapShare: 0.6,
   bassMaxMedian: 55, bassMaxNote: 67,
-  harshIntervals: [1, 13], clashErrorShare: 0.25,
+  harshIntervals: [1, 13], clashErrorShare: 0.25, clashErrorMinHits: 4,
+  leadOverhangTicks: 48, counterLeadWindow: 4, figureMaxPeriod: 8, figureMaxPitches: 4, figureMinOnsets: 6,
   outOfKeyWarning: 0.1, outOfKeyError: 0.25, keyConfidence: 0.5,
   maxOnsetsPerBar: 40, maxActiveParts: 6,
   staticBars: 8, developmentMinBars: 16, developmentMaxPeriod: 4,
@@ -103,13 +105,15 @@ function groupOnsets(notes) {
   for (const g of groups) g.top = Math.max(...g.notes.map(n => n.midi));
   return groups;
 }
-// An arpeggio or ostinato: evenly spaced onsets cycling through four or fewer pitches.
+// An arpeggio or ostinato: evenly spaced onsets that cycle with a period of up to eight notes,
+// or six or more evenly spaced onsets on four or fewer pitches (a broken chord).
 export function isFigure(groups) {
   if (groups.length < 4) return false;
   const gap = groups[1].tick - groups[0].tick;
   if (groups.some((g, i) => i && g.tick - groups[i - 1].tick !== gap)) return false;
   const line = groups.map(g => g.top);
-  for (let period = 1; period <= 4 && period * 2 <= line.length; period++) {
+  if (line.length >= thresholds.figureMinOnsets && new Set(line).size <= thresholds.figureMaxPitches) return true;
+  for (let period = 1; period <= thresholds.figureMaxPeriod && period * 2 <= line.length; period++) {
     if (line.every((p, i) => i < period || p === line[i - period])) return true;
   }
   return false;
@@ -137,7 +141,7 @@ function analyseTrack(track, model) {
     for (let b = first; b <= last; b++) soundBuckets[b].push(n);
   }
   const pitchSet = new Set(notes.map(n => n.midi));
-  const drums = track.role === 'drums' || ((track.kind === 'sample' || notes.every(n => n.length <= 12)) && pitchSet.size <= 3 && !track.role);
+  const drums = track.role === 'drums' || (notes.length > 0 && (track.kind === 'sample' || notes.every(n => n.length <= 12)) && pitchSet.size <= 3 && !track.role);
   const perBar = onsetBuckets.map((onsets, b) => describeBar(onsets, soundBuckets[b]));
   const t = thresholds;
   for (const bar of perBar) {
@@ -184,6 +188,11 @@ const where = bars => bars.length ? (bars.length === 1 ? ` in bar ${bars[0]}` : 
 export function buildContext(model) {
   const infos = model.tracks.map(track => analyseTrack(track, model));
   for (const info of infos) info.inferred = info.declared ? null : inferRole(info);
+  // The lowest moving line in the tenor register is a bass line (a walking bass), unless a bass is declared.
+  if (!infos.some(i => i.declared === 'bass' || i.inferred === 'bass')) {
+    const pitched = infos.filter(i => !i.drums && i.notes.length).sort((a, b) => a.median - b.median);
+    if (pitched[0]?.inferred === 'melodic' && pitched[0].median < thresholds.inferredBassMedian) pitched[0].inferred = 'bass';
+  }
   // Inferred melodic lines: the highest becomes the lead unless a lead is declared; the rest are counters.
   const declaredLead = infos.some(i => i.declared === 'lead');
   const melodic = infos.filter(i => i.inferred === 'melodic').sort((a, b) => b.median - a.median);
@@ -199,13 +208,16 @@ export function checkRoles(ctx) {
     out.push(finding('role.missing', 'note', `"${info.name}" has no role; it behaves like ${info.inferred}.`, [], [info.name],
       `Call set_track_role with trackName "${info.name}" and role "${info.inferred}" (or the role you intend).`));
   }
-  const sounding = (role, b) => ctx.infos.filter(i => i.declared === role && i.perBar[b].sounding.length);
+  const active = (role, b) => ctx.infos.filter(i => i.declared === role && plays(ctx, i, b));
   const leads = {}, counters = {}, lonely = [];
+  const leadBars = [...Array(ctx.bars).keys()].filter(b => active('lead', b).length);
   for (let b = 0; b < ctx.bars; b++) {
-    const l = sounding('lead', b), c = sounding('counter', b);
-    if (l.length > 1) (leads[l.map(i => i.name).join('|')] ??= []).push(b);
-    if (c.length > 1) (counters[c.map(i => i.name).join('|')] ??= []).push(b);
-    if (c.length && !l.length) lonely.push(...c.map(i => ({ b, name: i.name })));
+    const l = active('lead', b), c = active('counter', b);
+    // Doublings (same rhythm and contour) are one line, so an octave-doubled lead is not two leads.
+    if (voicesOf(l, b).length > 1) (leads[l.map(i => i.name).join('|')] ??= []).push(b);
+    if (voicesOf(c, b).length > 1) (counters[c.map(i => i.name).join('|')] ??= []).push(b);
+    // Call and response is fine: only a counter with no lead within a few bars either side is alone.
+    if (c.length && !leadBars.some(x => Math.abs(x - b) <= thresholds.counterLeadWindow)) lonely.push(...c.map(i => ({ b, name: i.name })));
   }
   for (const [names, bars] of Object.entries(leads)) {
     out.push(finding('role.multiple-leads', 'error', `${names.split('|').length} lead tracks (${names.split('|').join(', ')}) play at once${where(bars)}.`, bars, names.split('|'),
@@ -218,24 +230,36 @@ export function checkRoles(ctx) {
   const byTrack = {};
   for (const { b, name } of lonely) (byTrack[name] ??= []).push(b);
   for (const [name, bars] of Object.entries(byTrack)) {
-    out.push(finding('role.counter-without-lead', 'warning', `Counter "${name}" plays with no lead${where(bars)}.`, bars, [name],
+    out.push(finding('role.counter-without-lead', 'warning', `Counter "${name}" plays with no lead within ${thresholds.counterLeadWindow} bars${where(bars)}.`, bars, [name],
       `Either add the lead in those bars or set "${name}" to lead there.`));
   }
   return out;
 }
 
-// Melodic voices in a bar. Lines with the same rhythm and contour (doublings in octaves or thirds) count once.
-export function melodicVoices(ctx, b) {
-  const lines = ctx.infos.filter(i => i.perBar[b].melodic);
+// A track plays in a bar when a note starts there, or a held note covers more than a short overhang of it.
+export function plays(ctx, info, b) {
+  const bar = info.perBar[b];
+  if (bar.onsets.length) return true;
+  const start = b * ctx.tpb, end = start + ctx.tpb;
+  return bar.sounding.some(n => Math.min(end, n.tick + n.length) - Math.max(start, n.tick) > thresholds.leadOverhangTicks);
+}
+// Group tracks into lines for one bar. Tracks with the same rhythm and contour (doublings in octaves, thirds or sixths) are one line.
+export function voicesOf(infos, b) {
   const voices = [];
-  for (const info of lines) {
+  for (const info of infos) {
     const bar = info.perBar[b];
     const rhythm = bar.groups.map(g => g.tick).join(',');
     const contour = bar.groups.map((g, k) => k ? Math.sign(g.top - bar.groups[k - 1].top) : 0).join(',');
-    const same = voices.find(v => v.rhythm === rhythm && v.contour === contour);
+    const same = rhythm && voices.find(v => v.rhythm === rhythm && v.contour === contour);
     if (same) same.tracks.push(info.name); else voices.push({ rhythm, contour, tracks: [info.name] });
   }
   return voices.map(v => v.tracks);
+}
+// Roles that support the melody. Their lines never count as competing melodies, however they move.
+const supportRoles = ['drums', 'bass', 'harmony', 'texture'];
+// Melodic voices in a bar, from tracks not declared as a supporting role.
+export function melodicVoices(ctx, b) {
+  return voicesOf(ctx.infos.filter(i => i.perBar[b].melodic && !supportRoles.includes(i.declared) && i.inferred !== 'bass'), b);
 }
 export function checkCompetingMelodies(ctx) {
   const bad = [], involved = new Set();
@@ -300,13 +324,20 @@ export function checkClashes(ctx) {
   for (let b = 0; b < ctx.bars; b++) {
     for (const offset of strong) {
       const tick = b * ctx.tpb + offset;
-      const at = pitched.map(i => ({ name: i.name, notes: i.perBar[b].sounding.filter(n => n.tick <= tick && n.tick + n.length > tick) })).filter(x => x.notes.length);
+      // A harmony track's chord is every pitch class it plays in the bar (an arpeggio spreads its chord over the bar); other tracks own only what sounds on the beat.
+      const at = pitched.map(i => {
+        const notes = i.perBar[b].sounding.filter(n => n.tick <= tick && n.tick + n.length > tick);
+        return { name: i.name, notes, own: new Set((i.role === 'harmony' ? i.perBar[b].sounding : notes).map(n => n.midi % 12)) };
+      }).filter(x => x.notes.length);
       for (let x = 0; x < at.length; x++) {
         for (let y = x + 1; y < at.length; y++) {
           const key = `${at[x].name}|${at[y].name}`;
           const pair = pairs[key] ??= { eligible: 0, bars: [], examples: [] };
           pair.eligible++;
-          const hit = at[x].notes.flatMap(a => at[y].notes.filter(c => thresholds.harshIntervals.includes(Math.abs(a.midi - c.midi))).map(c => [a.midi, c.midi]));
+          // A pitch class that one track already plays is part of its chord (a major seventh, an added ninth), so doubling it elsewhere is not a clash.
+          const ownX = at[x].own, ownY = at[y].own;
+          const hit = at[x].notes.flatMap(a => at[y].notes.filter(c => thresholds.harshIntervals.includes(Math.abs(a.midi - c.midi)) &&
+            !ownX.has(c.midi % 12) && !ownY.has(a.midi % 12)).map(c => [a.midi, c.midi]));
           if (hit.length) { pair.bars.push(b); if (pair.examples.length < 3) pair.examples.push(hit[0]); pair.hits = (pair.hits ?? 0) + 1; }
         }
       }
@@ -317,7 +348,7 @@ export function checkClashes(ctx) {
     if (!pair.hits) continue;
     const share = pair.hits / pair.eligible;
     const names = key.split('|');
-    out.push(finding('clash.harsh-interval', share > thresholds.clashErrorShare ? 'error' : 'warning',
+    out.push(finding('clash.harsh-interval', pair.hits >= thresholds.clashErrorMinHits && share > thresholds.clashErrorShare ? 'error' : 'warning',
       `"${names[0]}" and "${names[1]}" form minor seconds or minor ninths on ${plural(pair.hits, 'strong beat')}${where(pair.bars)} (for example MIDI ${pair.examples[0].join(' against ')}).`,
       pair.bars, names, 'Move one of the clashing notes to a chord tone on the beat, or delay it to a weak beat as a passing note.'));
   }
@@ -342,7 +373,8 @@ export function checkKey(ctx, key) {
   const share = outside / total;
   if (share <= thresholds.outOfKeyWarning) return [];
   const tracks = ctx.infos.filter(i => !i.drums && i.notes.some(n => !allowed.has(n.midi % 12))).map(i => i.name);
-  return [finding('key.out-of-key', share > thresholds.outOfKeyError ? 'error' : 'warning',
+  // Detection only knows major and minor, so a detected key can warn but never block.
+  return [finding('key.out-of-key', share > thresholds.outOfKeyError && key.confidence === undefined ? 'error' : 'warning',
     `${Math.round(share * 100)}% of the pitched note time is outside ${key.name} (${Object.keys(strays).join(', ')})${where(bars)}.`, bars, tracks,
     `Bring the stray notes into ${key.name}, or pass the key you intend if ${key.name} is wrong.`)];
 }
@@ -494,8 +526,8 @@ export function qualityScore(lint, { audioWarnings = [], silent = false, thresho
 // Short output for the server hooks on create_project, add_track, apply_edits and export_game_audio.
 export function hookReport(lint, maxLines = 8) {
   const serious = lint.findings.filter(f => f.severity !== 'note');
+  if (!serious.length) return null; // missing roles alone are reported by lint_arrangement, not on every save
   const unroled = lint.roles.filter(r => r.inferred && r.role !== 'texture').map(r => `${r.track} (${r.role})`);
-  if (!serious.length && !unroled.length) return null;
   const warnings = serious.slice(0, maxLines).map(f => `${f.severity.toUpperCase()} ${f.rule}: ${f.message} Fix: ${f.fix}`);
   if (serious.length > maxLines) warnings.push(`${serious.length - maxLines} more; run lint_arrangement for the full list.`);
   if (unroled.length) warnings.push(`Tracks without a role: ${unroled.join(', ')}. Declare them with set_track_role.`);
