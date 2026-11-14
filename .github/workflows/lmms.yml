@@ -1,0 +1,131 @@
+name: LMMS
+
+# Renders with stock LMMS 1.2.2 and runs every verify-*.mjs script at the repository root.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lmms-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LMMS_VERSION: 1.2.2
+
+jobs:
+  windows:
+    name: LMMS render (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Cache LMMS installer
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\lmms-installer
+          key: lmms-win64-${{ env.LMMS_VERSION }}
+      - name: Download LMMS installer
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'lmms-installer'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          gh release download "v$env:LMMS_VERSION" -R LMMS/lmms -p "lmms-$env:LMMS_VERSION-win64.exe" -D $dir
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Install LMMS silently
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "lmms-installer\lmms-$env:LMMS_VERSION-win64.exe"
+          $process = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
+          if (!(Test-Path 'C:\Program Files\LMMS\lmms.exe')) { throw 'lmms.exe not found after install' }
+      - name: Check for ffmpeg
+        shell: pwsh
+        run: |
+          $found = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if ($found) { "ffmpeg: $($found.Source)" } else { 'ffmpeg not found; OGG checks will report it missing' }
+      - name: Run verify scripts
+        shell: bash
+        run: |
+          set -e
+          for script in verify-*.mjs; do
+            echo "::group::$script"
+            node "$script"
+            echo "::endgroup::"
+          done
+
+  linux:
+    name: LMMS render (ubuntu-latest, AppImage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Cache LMMS AppImage
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/lmms-appimage
+          key: lmms-appimage-${{ env.LMMS_VERSION }}
+      - name: Download LMMS AppImage
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/lmms-appimage"
+          gh release download "v$LMMS_VERSION" -R LMMS/lmms -p "lmms-$LMMS_VERSION-linux-x86_64.AppImage" -D "$RUNNER_TEMP/lmms-appimage"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Extract AppImage
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          chmod +x "lmms-appimage/lmms-$LMMS_VERSION-linux-x86_64.AppImage"
+          "./lmms-appimage/lmms-$LMMS_VERSION-linux-x86_64.AppImage" --appimage-extract > /dev/null
+          root="$RUNNER_TEMP/squashfs-root"
+          ls -la "$root" "$root/usr/bin" || true
+          find "$root/usr" -maxdepth 3 -type d -name 'presets' -o -maxdepth 3 -type d -name 'samples' | head
+          find "$root/usr" -name 'libtripleoscillator.so' | head
+          find "$root/usr" -name 'caps.so' | head
+      - name: Install ffmpeg
+        run: command -v ffmpeg || (sudo apt-get update -q && sudo apt-get install -y -q ffmpeg)
+      - name: Point the server at the extracted LMMS
+        run: |
+          set -e
+          root="$RUNNER_TEMP/squashfs-root"
+          plugins="$(dirname "$(find "$root/usr" -name 'libtripleoscillator.so' | head -n1)")"
+          {
+            echo "LMMS_EXECUTABLE=$root/AppRun"
+            echo "LMMS_PRESETS=$root/usr/share/lmms/presets"
+            echo "LMMS_SAMPLES=$root/usr/share/lmms/samples"
+            echo "LMMS_PLUGINS=$plugins"
+          } >> "$GITHUB_ENV"
+      - name: LMMS smoke test
+        run: |
+          "$LMMS_EXECUTABLE" --version || true
+          ls "$LMMS_PRESETS" | head; ls "$LMMS_PLUGINS" | head
+      - name: Run verify scripts
+        run: |
+          set -e
+          for script in verify-*.mjs; do
+            echo "::group::$script"
+            node "$script"
+            echo "::endgroup::"
+          done
