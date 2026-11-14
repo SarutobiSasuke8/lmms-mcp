@@ -1,0 +1,75 @@
+name: CI
+
+# Checks that need no LMMS: syntax, unit tests, server start-up and package contents.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Syntax check every .mjs file
+        shell: bash
+        run: |
+          set -e
+          count=0
+          while IFS= read -r file; do
+            node --check "$file"
+            count=$((count + 1))
+          done < <(git ls-files '*.mjs')
+          echo "Checked $count files"
+      - run: npm test
+      - name: Server starts and lists its tools
+        run: node .github/scripts/smoke-server.mjs
+      - name: Package contents
+        shell: bash
+        run: npm pack --dry-run
+
+  schema-diff:
+    name: Tool schema changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm ci
+        working-directory: base
+      - name: Compare tool schemas with the base branch
+        run: |
+          set -e
+          node .github/scripts/smoke-server.mjs --out "$RUNNER_TEMP/head.json"
+          node .github/scripts/smoke-server.mjs --server base/server.mjs --out "$RUNNER_TEMP/base.json"
+          node .github/scripts/diff-schemas.mjs "$RUNNER_TEMP/base.json" "$RUNNER_TEMP/head.json" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,11 @@
+# Store text with LF and check it out with LF on every platform.
+# This stops the "LF will be replaced by CRLF" warnings on Windows.
+* text=auto eol=lf
+
+*.webp binary
+*.png binary
+*.jpg binary
+*.wav binary
+*.ogg binary
+*.mid binary
+*.mmpz binary
