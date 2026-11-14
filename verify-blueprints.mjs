@@ -31,6 +31,7 @@ async function fails(name, args, pattern) {
 }
 const step = label => console.log('ok', label);
 const rows = [];
+let lintWarnings = 0;
 try {
   const tools = (await client.listTools()).tools.map(t => t.name);
   for (const name of ['develop_motif', 'list_blueprints', 'create_from_blueprint']) assert.ok(tools.includes(name), name);
@@ -73,6 +74,13 @@ try {
       assert.equal(roles.filter(r => r === 'lead').length, 1);
       assert.ok(roles.filter(r => r === 'counter').length <= 1);
 
+      // The arrangement lint (tools/arranger-lint.mjs) must find no errors.
+      if (tools.includes('lint_arrangement')) {
+        const lint = await call('lint_arrangement', { project: output, key: created.key });
+        const errors = (lint.findings ?? []).filter(f => f.severity === 'error');
+        assert.deepEqual(errors.map(f => f.message), [], `${output}: lint errors`);
+        lintWarnings += (lint.findings ?? []).filter(f => f.severity === 'warning').length;
+      }
       const audio = `${b.id}-${bpm}.wav`;
       const mix = await call('render_mix', { project: output, output: audio });
       // LMMS renders whole frames per tick, so at tempos where a tick is not a whole number of samples the file can be up to one tick short.
@@ -100,6 +108,7 @@ try {
     }
   }
   console.table(rows);
+  console.log(`lint_arrangement: no errors, ${lintWarnings} warnings in total`);
   console.log('All blueprint checks passed.');
 } finally {
   await client.close();

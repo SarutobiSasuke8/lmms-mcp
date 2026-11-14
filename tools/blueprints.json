@@ -35,8 +35,8 @@
       ],
       "body": [
         { "name": "A", "bars": 8, "energy": 2, "drums": "groove", "bass": "eighths", "harmony": "pulse", "lead": ["state", "repeat", "sequence_up", "half_cadence"] },
-        { "name": "B", "bars": 8, "energy": 3, "chords": "contrast", "drums": "groove", "bass": "syncopated", "harmony": "stabs", "texture": "arp", "lead": ["fragment", "rest", "invert", "rest"], "counter": ["rest", "answer", "rest", "answer"] },
-        { "name": "A2", "bars": 8, "energy": 2, "drums": "groove", "bass": "eighths", "harmony": "pulse", "texture": "arp", "lead": ["state", "rhythm", "fit", "cadence"] }
+        { "name": "B", "bars": 8, "energy": 3, "chords": "contrast", "drums": "groove", "bass": "syncopated", "harmony": "stabs", "texture": "shimmer", "lead": ["fragment", "rest", "invert", "rest"], "counter": ["rest", "answer", "rest", "answer"] },
+        { "name": "A2", "bars": 8, "energy": 2, "drums": "groove", "bass": "eighths", "harmony": "pulse", "texture": "shimmer", "lead": ["state", "rhythm", "fit", "cadence"] }
       ]
     },
     {
@@ -267,9 +267,9 @@
         { "name": "Intro", "bars": 2, "energy": 2, "drums": "intro", "bass": "octaves", "texture": "arp", "lead": "rest" }
       ],
       "body": [
-        { "name": "A", "bars": 8, "energy": 3, "drums": "run", "bass": "octaves", "harmony": "stabs", "texture": "arp", "lead": ["state", "repeat", "sequence_up", "half_cadence"] },
+        { "name": "A", "bars": 8, "energy": 3, "drums": "run", "bass": "octaves", "harmony": "hits", "texture": "arp", "lead": ["state", "repeat", "sequence_up", "half_cadence"] },
         { "name": "B", "bars": 8, "energy": 3, "chords": "contrast", "drums": "run", "bass": "eighths", "texture": "arp", "lead": ["diminish", "rest", "fragment", "rest"], "counter": ["rest", "answer", "rest", "answer"] },
-        { "name": "A2", "bars": 8, "energy": 3, "drums": "run", "bass": "octaves", "harmony": "stabs", "texture": "arp", "lead": ["state", "rhythm", "invert", "cadence"] }
+        { "name": "A2", "bars": 8, "energy": 3, "drums": "run", "bass": "octaves", "harmony": "hits", "texture": "arp", "lead": ["state", "rhythm", "invert", "cadence"] }
       ]
     },
     {
@@ -280,6 +280,7 @@
       "key": "Bb major",
       "bpm": 132,
       "phraseBars": 1,
+      "lanes": { "lead": [67, 96] },
       "motif": "5,:2 1:2 3:2 5:6 3:2 5:2",
       "progressions": { "main": "I IV", "close": "V I" },
       "tracks": [

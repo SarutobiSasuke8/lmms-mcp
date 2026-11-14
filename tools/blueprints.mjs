@@ -202,12 +202,14 @@ export function fitPlan(plan, room) {
   if (room === 1) return [ending.includes(plan.at(-1)) ? plan.at(-1) : plan.find(op => op !== 'rest') ?? plan[0]];
   return [...plan.slice(0, room - 1), plan.at(-1)];
 }
-// Move notes that would sound a semitone against another pitched part. Parts are settled in order:
-// bass, harmony, texture, counter. A clashing note tries the octave above and below, then the nearest tone of the
+// A minor second or minor ninth between parts sounds harsh.
+const harsh = (a, b) => Math.abs(a - b) === 1 || Math.abs(a - b) === 13;
+// Move notes that would sound a minor second or minor ninth against another pitched part. The lead is fixed first;
+// then parts are settled in order: bass, harmony, texture, counter. A clashing note tries the octave above and below, then the nearest tone of the
 // chord in its lane; if nothing fits it is dropped. The lead sits in its own lane above all of them.
 const settleOrder = ['bass', 'harmony', 'texture', 'counter'];
 export function resolveClashes(local, tracks, lanes, spans, offset) {
-  const fixed = [];
+  const fixed = tracks.filter(t => t.role === 'lead').flatMap(t => local[t.name] ?? []);
   const overlaps = (a, b) => a.tick < b.tick + b.length && b.tick < a.tick + a.length;
   for (const role of settleOrder) {
     for (const t of tracks.filter(t => t.role === role)) {
@@ -215,7 +217,7 @@ export function resolveClashes(local, tracks, lanes, spans, offset) {
       if (!notes) continue;
       const lane = lanes[role], out = [];
       for (const n of notes) {
-        const free = m => m >= lane[0] && m <= lane[1] && !fixed.some(f => overlaps(f, n) && Math.abs(f.midi - m) === 1) && !out.some(o => overlaps(o, n) && o.midi === m);
+        const free = m => m >= lane[0] && m <= lane[1] && !fixed.some(f => overlaps(f, n) && harsh(f.midi, m)) && !out.some(o => overlaps(o, n) && o.midi === m);
         if (free(n.midi)) { out.push(n); continue; }
         const span = spans.find(sp => sp.tick + offset <= n.tick && n.tick < sp.tick + offset + sp.ticks) ?? spans.at(-1);
         const chordTones = [];
@@ -242,15 +244,35 @@ export function scalePlan(plan, factor, pass = 0) {
 }
 // Keep a lead phrase in its lane. One or two stray notes (usually a cadence landing low) move by an octave on their own;
 // otherwise the whole phrase moves so its shape is kept.
-function keepInLane(events, [low, high]) {
+function keepInLane(events, [low, high], previous = null) {
   const p = pitches(events);
   if (!p.length) return events;
   const strays = p.filter(m => m < low).length;
-  if (strays && strays <= 2 && p.length > 3) return events.map(e => e.midi !== null && e.midi < low ? { ...e, midi: e.midi + 12 } : e);
+  // A low stray or two: either move just those notes up an octave or move the whole phrase up (if it still fits),
+  // whichever leaves the smaller largest leap, counting the step in from the previous phrase.
+  if (strays && strays <= 2 && p.length > 3) {
+    const folded = events.map(e => e.midi !== null && e.midi < low ? { ...e, midi: e.midi + 12 } : e);
+    const lifted = events.map(e => e.midi === null ? e : { ...e, midi: e.midi + 12 });
+    const cost = list => Math.max(largestLeap(list), previous === null ? 0 : Math.abs(pitches(list)[0] - previous));
+    return Math.max(...p) + 12 <= high + 5 && cost(lifted) < cost(folded) ? lifted : folded;
+  }
   let k = 0;
   while (Math.min(...p) + 12 * k < low) k++;
   while (Math.max(...p) + 12 * k > high && Math.min(...p) + 12 * (k - 1) >= low) k--;
   return events.map(e => e.midi === null ? e : { ...e, midi: e.midi + 12 * k });
+}
+// When a lead phrase would start more than an octave from the previous phrase's last note, move it an octave
+// towards that note if it stays in the lane (with a little headroom).
+const largestLeap = events => { const p = pitches(events); return Math.max(0, ...p.slice(1).map((m, i) => Math.abs(m - p[i]))); };
+function nearPrevious(events, previous, [low, high]) {
+  const p = pitches(events);
+  if (!p.length || previous === null || Math.abs(p[0] - previous) <= 12) return events;
+  let best = 0;
+  for (const k of [-1, 1]) {
+    if (Math.min(...p) + 12 * k < low || Math.max(...p) + 12 * k > high + 5) continue;
+    if (Math.abs(p[0] + 12 * k - previous) + 2 < Math.abs(p[0] + 12 * best - previous)) best = k;
+  }
+  return best ? events.map(e => e.midi === null ? e : { ...e, midi: e.midi + 12 * best }) : events;
 }
 // Fold every note into [low, high] by octaves. Used for counter lines, which must stay under the lead.
 function foldIntoLane(events, [low, high]) {
@@ -368,6 +390,7 @@ export function buildArrangement(blueprintOrId, { key: keyInput, bpm, lengthBars
   const tonicNear = fromDegree(Math.round(degreeOf(Math.round((lanes.lead[0] + lanes.lead[1]) / 2), key) / 7) * 7, key);
   const adjustments = [];
   const phrases = [];
+  let lastLead = null;
 
   const parts = Object.fromEntries(b.tracks.map(t => [t.name, []]));
   const map = [];
@@ -426,7 +449,9 @@ export function buildArrangement(blueprintOrId, { key: keyInput, bpm, lengthBars
           const chordsIn = () => spans.filter(sp => sp.tick + sp.ticks > at * 12 && sp.tick < (at + steps) * 12)
             .map(sp => ({ symbol: sp.symbol, steps: (Math.min(sp.tick + sp.ticks, (at + steps) * 12) - Math.max(sp.tick, at * 12)) / 12 }));
           const context = { chord: chordAt(at), chordAt: step => chordAt(at + step), chordsIn, steps, tonicNear };
-          const events = op === 'rest' ? [] : keepInLane(fitLength(leadOps[op](motif, key, context), steps), lanes.lead);
+          let events = op === 'rest' ? [] : keepInLane(fitLength(leadOps[op](motif, key, context), steps), lanes.lead, lastLead);
+          events = nearPrevious(events, lastLead, lanes.lead);
+          if (pitches(events).length) lastLead = pitches(events).at(-1);
           leadPlan.push({ section: s.name, bar: start + at / 16, op, ...(pitches(events).length ? { line: formatLine(events, key) } : {}) });
           if (pitches(events).length) notes.push(...toNotes(events, { offset: offset + at * 12, velocity: vel(92, energy) }));
         });
@@ -516,7 +541,7 @@ export function registerReport(tracks, lengthBars) {
   }
   return bars.map((s, i) => ({ bar: i, leads: s.lead.size, counters: s.counter.size, leadLow: s.leadLow === Infinity ? null : s.leadLow, supportHigh: s.supportHigh === -Infinity ? null : s.supportHigh }));
 }
-// Notes of different pitched tracks that sound together a semitone apart.
+// Notes of different pitched tracks that sound together a minor second or minor ninth apart.
 export function semitoneClashes(tracks) {
   const notes = tracks.filter(t => t.role !== 'drums' && t.role !== 'fx')
     .flatMap(t => t.patterns.flatMap(p => p.notes.map(n => ({ track: t.name, midi: n.midi, start: p.bar * bar + n.tick, end: p.bar * bar + n.tick + n.length }))))
@@ -525,7 +550,7 @@ export function semitoneClashes(tracks) {
   for (let i = 0; i < notes.length; i++) {
     for (let j = i + 1; j < notes.length && notes[j].start < notes[i].end; j++) {
       const a = notes[i], b = notes[j];
-      if (a.track !== b.track && Math.abs(a.midi - b.midi) === 1) clashes.push({ bar: Math.floor(b.start / bar), tracks: [a.track, b.track], midi: [a.midi, b.midi] });
+      if (a.track !== b.track && harsh(a.midi, b.midi)) clashes.push({ bar: Math.floor(b.start / bar), tracks: [a.track, b.track], midi: [a.midi, b.midi] });
     }
   }
   return clashes;

@@ -297,3 +297,18 @@ test('review extras: wide motifs, length warnings and the MIDI ceiling', () => {
     assert.ok(a.tracks.every(t => t.patterns.every(p => p.notes.every(n => n.midi <= 108))), id);
   }
 });
+
+test('lint-facing rules: lead leaps stay within an octave and bars are not crowded', () => {
+  for (const id of blueprintIds) {
+    for (const key of [undefined, 'C', 'F#', 'Bb', 'G']) {
+      const a = buildArrangement(id, { key });
+      const lead = a.tracks.find(t => t.role === 'lead').patterns.flatMap(p => p.notes);
+      const leaps = lead.slice(1).filter((n, i) => Math.abs(n.midi - lead[i].midi) > 12).length;
+      // A fanfare may drop more than an octave between phrases; loops may not.
+      assert.ok(leaps <= (a.blueprint.kind === 'stinger' ? 1 : 0), `${id} in ${a.key}: ${leaps} leaps over an octave`);
+      const starts = new Array(a.lengthBars).fill(0);
+      for (const t of a.tracks.filter(t => t.role !== 'drums')) for (const p of t.patterns) for (const n of p.notes) starts[p.bar + Math.floor(n.tick / 192)]++;
+      assert.ok(Math.max(...starts) <= 40, `${id} in ${a.key}: ${Math.max(...starts)} pitched notes start in one bar`);
+    }
+  }
+});

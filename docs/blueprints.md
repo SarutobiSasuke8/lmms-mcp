@@ -144,6 +144,7 @@ For each pitched track the tool ranks native factory presets from the measured c
 
 `node verify-blueprints.mjs` runs over stdio against the installed LMMS. It creates every blueprint at two tempos (one with the default sounds, one with suggested sounds and, for loops, an outside motif and key), renders each with `render_mix`, and checks:
 
+- `lint_arrangement` finds no errors in the project (warnings are counted and printed);
 - the rendered duration matches the reported length (LMMS renders whole frames per tick, so at some tempos the file is up to one tick, under a millisecond, short);
 - no clipped samples;
 - `analyze_audio` with the returned section map finds no silent section (every section above -45 dBFS RMS);
