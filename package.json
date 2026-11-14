@@ -6,6 +6,7 @@
   "files": [
     "server.mjs",
     "fathom.mjs",
+    "vst3-render.py",
     "catalogue.mjs",
     "composers.mjs",
     "audio.mjs",
@@ -19,7 +20,8 @@
     "verify-game-audio.mjs",
     "art/",
     "COMPARISON.md",
-    "setup-windows.ps1"
+    "setup-windows.ps1",
+    "setup-vst3-windows.ps1"
   ],
   "engines": {
     "node": ">=22"

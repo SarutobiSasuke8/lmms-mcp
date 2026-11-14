@@ -177,6 +177,28 @@ The bridge uses the written pitches, note lengths and velocities. It interpolate
 
 `search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
 
+## External VST3 instruments
+
+The MCP package includes the VST3 adapter. Install the optional host dependencies and instruments locally to enable it. Use `list_external_tools` to see the upstream links, configured plugins and whether the selected Python has the required packages. The tool reports file presence. A render verifies whether a plugin and preset load successfully.
+
+On Windows x64 with Python 3.12 installed, run `./setup-vst3-windows.ps1` from the package or checkout. It downloads pinned portable Decent Sampler and Surge XT plug-ins from their publishers, checks their SHA-256 hashes and creates an isolated host environment. Copy the generated `mcp-env.json` entries into your MCP client's environment settings and restart the client. The default destination is `%LOCALAPPDATA%/lmms-mcp/vst3-v1`. Use `-InstallDirectory` with a new directory for a separate install or to retry a failed setup. The command leaves system plug-in folders alone and sample libraries are obtained separately.
+
+For manual setup, create an isolated Python environment and set its executable and both plugin locations in your MCP client environment:
+
+```powershell
+py -3.12 -m venv .venv-vst3
+.\.venv-vst3\Scripts\python.exe -m pip install pedalboard==0.9.26 mido==1.3.3
+$env:LMMS_VST3_PYTHON = (Resolve-Path .\.venv-vst3\Scripts\python.exe).Path
+$env:LMMS_DECENT_SAMPLER_VST3 = 'C:\path\to\DecentSampler.vst3\Contents\x86_64-win\DecentSampler.vst3'
+$env:LMMS_SURGE_XT_VST3 = 'C:\path\to\Surge XT.vst3\Contents\x86_64-win\Surge XT.vst3'
+```
+
+Download [Decent Sampler](https://store.decentsamples.com/downloads/decent-sampler/versions) and [Surge XT](https://surge-synthesizer.github.io/downloads/) from their publishers. The Windows test used the inner 64-bit VST3 binaries. Open the desired Decent Sampler library in a VST3 host and save its state as a `.vstpreset`. Copy that preset to the workspace and keep the library at the location the preset expects.
+
+Export an editable LMMS arrangement with `export_midi`, then pass the MIDI filename, render duration, and named track assignments to `render_vst3_stems`. Assign each stem a configured instrument, an optional workspace `.vstpreset`, normalized parameter overrides and gain in dB. The adapter returns aligned 48 kHz stereo WAVs, a stereo mix and a manifest with the assignments and frame count. Choose a duration that covers the notes and any desired release tail. The output is a fixed-length stem render. For a game loop, set the intended loop length and check the seam before shipping.
+
+Use `list_effects` and `edit_effect` for LMMS post-production. You can place bounced WAVs with `edit_sample_clip` and apply a master-chain compressor, limiter or reverb. For individual mixer buses, load each bounce as an AudioFileProcessor instrument track and route it with `route_mixer_bus`. Use `analyze_audio` to check levels and the seam after processing. The external VST3 adapter currently hosts instruments. The LMMS effect tools handle the post-production chain.
+
 ## Composer profiles
 
 Search for `victory`, `whole-tone`, `counterpoint`, `jrpg`, `minimalism`, `folklore`, `sparse hub` or `orchestration` with `list_composer_profiles`. The 11 profiles include Grieg’s modal drone, Satie’s sparse accompaniment and Rimsky-Korsakov’s register exchanges. Pass a result's ID to `create_composer_sketch` with an output filename, MIDI root, tempo and bar count. The sketch works with stock LMMS and returns a suggested Fathom patch ID for its motif track. Open it in LMMS or render it with `render_mix`.
