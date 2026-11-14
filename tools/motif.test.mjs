@@ -156,3 +156,17 @@ test('develop_motif returns pasteable lines for every operation in every key', (
   assert.equal(developMotif('D5:1 C#5:1', 'D minor').snappedToKey, 1);
   assert.throws(() => developMotif('r:4', 'D minor'), /at least one note/);
 });
+
+test('review extras: one-note fragments, even rhythm on fractional lengths, degree velocities, low MIDI numbers', () => {
+  const one = parseLine('D5:4');
+  assert.equal(names(fragment(one, 'last')), 'D5:4');
+  assert.equal(developMotif('D5:4', 'D minor', { operations: ['fragment_last'] }).variations[0].line, 'D5:4');
+  const fractional = parseLine('D5:1.5 F5:1.5 A5:1.5');
+  const even = varyRhythm(fractional, 'even');
+  assert.equal(totalSteps(even), 4.5);
+  assert.deepEqual(pitches(even), pitches(fractional));
+  assert.equal(names(readMotif('1:2:100 3:2', dMinor)), 'D4:2:100 F4:2');
+  assert.throws(() => readMotif('1:2 C5:2', dMinor), /outside MIDI 12-119/);
+  const over = cadence(parseLine('D5:2 F5:2 A5:4 G5:2 F5:2 E5:4'), dMinor, 'authentic', { chord: 'A' });
+  assert.ok([9, 1, 4].includes(pitches(over).at(-1) % 12), 'over A major the ending lands on a tone of A');
+});

@@ -88,11 +88,13 @@ try {
       const range = Math.max(...loudness) - Math.min(...loudness);
       assert.ok(range <= 14, `${output}: sections differ by ${range.toFixed(1)} LU: ${report.sections.map(s => `${s.name} ${s.integratedLufs}`).join(", ")} with ${created.tracks.map(t => `${t.name}=${t.preset ?? t.voice}@${t.volume}`).join(" ")}`);
       assert.ok(report.integratedLufs >= -30 && report.integratedLufs <= -8, `${output}: overall loudness ${report.integratedLufs} LUFS`);
+      // Brightness: the 2-6 kHz band within 16 dB of the 500 Hz-2 kHz band, so the mix is not dull.
+      assert.ok(report.bandsDbfs.highMid >= report.bandsDbfs.mid - 16, `${output}: 2-6 kHz at ${report.bandsDbfs.highMid} dBFS against ${report.bandsDbfs.mid} dBFS at 500 Hz-2 kHz`);
       const energy = created.sections.map((s, i) => ({ energy: s.energy, lufs: report.sections[i].integratedLufs }));
       const quiet = Math.max(...energy.filter(e => e.energy === Math.min(...energy.map(x => x.energy))).map(e => e.lufs));
       const loud = Math.max(...energy.filter(e => e.energy === Math.max(...energy.map(x => x.energy))).map(e => e.lufs));
       assert.ok(loud >= quiet - 1, `${output}: the busiest sections (${loud} LUFS) are not quieter than the calmest (${quiet} LUFS)`);
-      rows.push({ file: output, frameGap: Math.round((created.lengthSeconds - mix.durationSeconds) * 48000), sounds: index === 1 ? 'suggested' : 'default', bars: created.lengthBars, seconds: created.lengthSeconds, peakDbfs: mix.peakDbfs,
+      rows.push({ file: output, frameGap: Math.round((created.lengthSeconds - mix.durationSeconds) * 48000), sounds: index === 1 ? 'suggested' : 'default', centroidHz: report.centroidHz, highMidDbfs: report.bandsDbfs.highMid, airDbfs: report.bandsDbfs.air, midDbfs: report.bandsDbfs.mid, bars: created.lengthBars, seconds: created.lengthSeconds, peakDbfs: mix.peakDbfs,
         lufs: report.integratedLufs, sectionRangeLu: Number(range.toFixed(1)), quietestSectionRmsDbfs: Math.min(...report.sections.map(s => s.rmsDbfs)) });
       step(`${output}: ${created.lengthBars} bars, ${mix.durationSeconds} s, peak ${mix.peakDbfs} dBFS, ${report.integratedLufs} LUFS, section range ${range.toFixed(1)} LU`);
     }

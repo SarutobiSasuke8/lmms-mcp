@@ -64,7 +64,9 @@ export function parseLine(line) {
     const steps = Number(match[2] ?? 1);
     if (!(steps > 0)) throw new Error(`Motif token "${token}" needs a positive length in steps`);
     const rest = /^[rR_]$/.test(match[1]);
-    return { midi: rest ? null : noteNumber(match[1]), steps, ...(match[3] && !rest ? { velocity: Number(match[3]) } : {}) };
+    const midi = rest ? null : noteNumber(match[1]);
+    if (midi !== null && (midi < 12 || midi > 119)) throw new Error(`Motif note "${match[1]}" is outside MIDI 12-119. Use note names such as D5, or scale degrees 1-7 for every token.`);
+    return { midi, steps, ...(match[3] && !rest ? { velocity: Number(match[3]) } : {}) };
   });
 }
 // Raw notes (ticks) to events. Gaps become rests. Notes must not overlap: a motif is one line.
@@ -84,17 +86,20 @@ export function fromNotes(notes, stepsPerBar = 16) {
 // Scale-degree motifs for blueprints: "1:2 3:2 5:4 r:2". ' raises an octave, , lowers one.
 export function parseDegrees(text, key) {
   return String(text).trim().split(/\s+/).map(token => {
-    const match = /^(r|[1-7])([',]*)(?::([\d.]+))?$/.exec(token);
-    if (!match) throw new Error(`Cannot read degree token "${token}". Use 1-7 with ' or , for octaves, then :steps.`);
+    const match = /^(r|[1-7])([',]*)(?::([\d.]+))?(?::(\d+))?$/.exec(token);
+    if (!match) throw new Error(`Cannot read degree token "${token}". Use 1-7 with ' or , for octaves, then :steps and optionally :velocity.`);
     const steps = Number(match[3] ?? 1);
+    if (!(steps > 0)) throw new Error(`Degree token "${token}" needs a positive length in steps`);
     if (match[1] === 'r') return { midi: null, steps };
     const octave = [...match[2]].reduce((sum, c) => sum + (c === "'" ? 1 : -1), 0);
-    return { midi: fromDegree(Number(match[1]) - 1 + octave * 7 + 28, key), steps };
+    return { midi: fromDegree(Number(match[1]) - 1 + octave * 7 + 28, key), steps, ...(match[4] ? { velocity: Number(match[4]) } : {}) };
   });
 }
 export function readMotif(input, key, { stepsPerBar = 16 } = {}) {
   if (Array.isArray(input)) return fromNotes(input, stepsPerBar);
-  if (/^\s*(r|[1-7])[',]*(:[\d.]+)?(\s|$)/.test(input) && !/[A-Ga-g]/.test(input)) return parseDegrees(input, key);
+  // Scale degrees: every token is r or 1-7 (with octave marks), :steps and an optional :velocity.
+  const tokens = String(input).trim().split(/\s+/);
+  if (tokens.every(t => /^(r|[1-7])[',]*(:[\d.]+){0,2}$/.test(t)) && tokens.some(t => /^[1-7]/.test(t))) return parseDegrees(input, key);
   return parseLine(input);
 }
 export function formatLine(events, key) {
@@ -206,11 +211,14 @@ const rhythmStyles = {
     for (let i = 0; i + 1 < out.length; i += 2) [out[i].steps, out[i + 1].steps] = [out[i + 1].steps, out[i].steps];
     return out;
   },
+  // Equal whole steps where possible; the last note takes whatever is left, so the total never drifts.
   even: notes => {
     const sum = notes.reduce((s, e) => s + e.steps, 0), base = Math.floor(sum / notes.length);
     if (!base) return notes.map(e => ({ ...e }));
-    let extra = sum - base * notes.length;
-    return notes.map(e => ({ ...e, steps: base + (extra-- > 0 ? 1 : 0) }));
+    let extra = Math.floor(sum - base * notes.length);
+    const out = notes.map(e => ({ ...e, steps: base + (extra-- > 0 ? 1 : 0) }));
+    out.at(-1).steps = sum - out.slice(0, -1).reduce((s, e) => s + e.steps, 0);
+    return out;
   },
 };
 export const rhythmStyleNames = Object.keys(rhythmStyles);
@@ -233,6 +241,7 @@ export function fragment(events, which = 'first') {
     if (distance < bestDistance) { bestDistance = distance; cut = i; }
   }
   let part = which === 'last' ? events.slice(cut) : events.slice(0, cut);
+  if (!part.some(e => e.midi !== null)) part = events.slice(0, lastNote(events) + 1);
   while (part.length > 1 && part.at(-1).midi === null) part = part.slice(0, -1);
   return part.map(e => ({ ...e }));
 }
@@ -260,7 +269,10 @@ export function callAndResponse(events, key) {
 }
 // Rewrite the ending: the last note lands on the tonic (authentic) or the 5th (half), approached by step,
 // and trailing rests are folded into the final note so it rings.
-export function cadence(events, key, type = 'authentic') {
+// With `chord` (the chord under the last note), the ending lands on a tone of that chord: the tonic (or 5th)
+// when the chord has it, otherwise the most stable scale degree that the chord does have.
+const cadenceDegrees = { authentic: [0, 2, 4, 5, 3, 1, 6], half: [4, 1, 6, 2, 0, 3, 5] };
+export function cadence(events, key, type = 'authentic', { chord } = {}) {
   let out = events.map(e => ({ ...e }));
   const last = lastNote(out);
   if (last < 0) return out;
@@ -270,7 +282,9 @@ export function cadence(events, key, type = 'authentic') {
   const before = out.findLastIndex((e, i) => i < last && e.midi !== null);
   // Pick the target nearest the last note, weighing the note before it too, so the ending does not leap away.
   const lastDegree = degreeOf(out[last].midi, key), beforeDegree = before >= 0 ? degreeOf(out[before].midi, key) : lastDegree;
-  const wanted = type === 'half' ? 4 : 0;
+  const order = cadenceDegrees[type === 'half' ? 'half' : 'authentic'];
+  const tones = chord ? chordTones(chord) : null;
+  const wanted = (tones && order.find(d => tones.has(mod(key.tonic + key.scale[d], 12)))) ?? order[0];
   let target = lastDegree, bestCost = Infinity;
   for (let d = lastDegree - 7; d <= lastDegree + 7; d++) {
     if (mod(d, 7) !== wanted) continue;
@@ -324,8 +338,8 @@ export const operations = {
   fragment_first: { about: 'The first cell only.', run: m => fragment(m, 'first') },
   fragment_last: { about: 'The last cell only.', run: m => fragment(m, 'last') },
   call_response: { about: 'Statement that ends open, then an answer that ends on the tonic.', run: (m, k) => callAndResponse(m, k).events },
-  cadence: { about: 'Ending rewritten to land on the tonic by step, with the last note held.', run: (m, k) => cadence(m, k, 'authentic') },
-  half_cadence: { about: 'Ending rewritten to land on the 5th, leaving the phrase open.', run: (m, k) => cadence(m, k, 'half') },
+  cadence: { about: 'Ending rewritten to land on the tonic by step, with the last note held.', run: (m, k, o) => cadence(m, k, 'authentic', { chord: o.chord }) },
+  half_cadence: { about: 'Ending rewritten to land on the 5th, leaving the phrase open.', run: (m, k, o) => cadence(m, k, 'half', { chord: o.chord }) },
 };
 export const operationNames = Object.keys(operations);
 function defaultChord(key) {
@@ -357,7 +371,7 @@ export function register({ tool, z }) {
       .describe('A melody line such as "D5:2 F5:2 A5:4 G5:2 F5:2 E5:4", or raw notes in ticks (48 per beat).'),
     key: z.string().min(1).max(30).describe('Tonic and mode, for example "D minor", "F# dorian", "Bb major", "C harmonic minor".'),
     operations: z.array(z.enum(operationNames)).min(1).max(operationNames.length).optional().describe('Which variations to return. Default: all.'),
-    chord: z.string().max(12).optional().describe('Chord for fit_chord, such as "Gm" or "F". Default: the tonic chord.'),
+    chord: z.string().max(12).optional().describe('Chord for fit_chord, such as "Gm" or "F" (default: the tonic chord). For cadence and half_cadence, the chord under the last note: the ending then lands on one of its tones.'),
     step: z.number().int().min(1).max(4).optional().describe('Scale steps per sequence move. Default 1.'),
     count: z.number().int().min(2).max(4).optional().describe('Statements in a sequence. Default 2.'),
     rhythm: z.enum(rhythmStyleNames).optional().describe('Rhythm change style. Default: the first of dotted, swap, even that changes the motif.'),

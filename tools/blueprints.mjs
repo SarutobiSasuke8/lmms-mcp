@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { parseChord } from '../music.mjs';
 import {
   parseKey, readMotif, fitKey, pitches, totalSteps, formatLine, toNotes, fitLength, fitRegister, pitchClassName, degreeOf, fromDegree,
-  shift, fitToChord, invert, retrograde, augment, diminish, varyRhythm, fragment, sequence, repeat, callAndResponse, cadence,
+  shift, fitToChord, invert, retrograde, augment, diminish, varyRhythm, fragment, sequence, repeat, callAndResponse, cadence, modes,
 } from './motif.mjs';
 
 const library = JSON.parse(readFileSync(new URL('./blueprints.json', import.meta.url), 'utf8'));
@@ -30,7 +30,8 @@ const numerals = ['VII', 'III', 'VI', 'IV', 'II', 'V', 'I'];
 const numeralDegree = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7 };
 const minorSuffix = { '': 'm', 7: 'm7', maj7: 'mMaj7', 6: 'm6', 9: 'm9', add9: 'madd9' };
 // Roman numerals count scale degrees of the key's own mode. Upper case is a major chord, lower case minor,
-// "o" or "dim" diminished, then an optional quality such as 7, maj7, sus4 or add9. b or # moves the root.
+// "o" or "dim" diminished, then an optional quality such as 7, maj7, sus4 or add9. A b or # prefix is read against
+// the major scale, as usual: bVII is a whole step under the tonic in any mode, and bIII a minor third above it.
 // With diatonic, the chord quality comes from the key instead of the case, so a progression written for one mode
 // stays inside the key when it is used in another.
 export function romanToChord(token, key, { diatonic = false } = {}) {
@@ -41,7 +42,9 @@ export function romanToChord(token, key, { diatonic = false } = {}) {
   const upper = match[2] === match[2].toUpperCase();
   if (!upper && match[2] !== match[2].toLowerCase()) return null;
   const degree = numeralDegree[word];
-  const root = mod(key.tonic + key.scale[degree - 1] + (match[1] === '#' ? 1 : match[1] === 'b' ? -1 : 0), 12);
+  const root = match[1] ? mod(key.tonic + modes.major[degree - 1] + (match[1] === '#' ? 1 : -1), 12) : mod(key.tonic + key.scale[degree - 1], 12);
+  // A flat numeral is spelled with flats and a sharp one with sharps; otherwise the key decides.
+  const spelling = match[1] === 'b' ? { flats: true } : match[1] === '#' ? { flats: false } : key;
   let suffix = match[3];
   let quality;
   if (diatonic && !match[1]) {
@@ -51,7 +54,7 @@ export function romanToChord(token, key, { diatonic = false } = {}) {
     if (/7/.test(suffix)) {
       quality = { '': seventh === 11 ? 'maj7' : '7', m: seventh === 11 ? 'mMaj7' : 'm7', dim: seventh === 10 ? 'm7b5' : 'dim7', aug: 'aug' }[triad];
     } else quality = /^sus[24]?$/.test(suffix) && triad !== 'dim' ? suffix : triad;
-    const symbol = pitchClassName(root, key) + quality;
+    const symbol = pitchClassName(root, spelling) + quality;
     parseChord(symbol);
     return symbol;
   }
@@ -60,7 +63,7 @@ export function romanToChord(token, key, { diatonic = false } = {}) {
   else if (/^(ø7?|m7b5)$/.test(suffix)) quality = 'm7b5';
   else if (upper) quality = suffix;
   else quality = minorSuffix[suffix] ?? suffix;
-  const symbol = pitchClassName(root, key) + quality;
+  const symbol = pitchClassName(root, spelling) + quality;
   parseChord(symbol);
   return symbol;
 }
@@ -76,7 +79,9 @@ export function parseProgression(text, key, { diatonic = false } = {}) {
       try { parseChord(name); symbol = name; } catch { throw new Error(`Cannot read chord "${name}". Use chord symbols such as Dm or Bb7, or Roman numerals such as i, IV or V7.`); }
     }
     const bars = length === undefined ? null : Number(length);
-    if (bars !== null && !(bars > 0)) throw new Error(`Chord "${token}" needs a positive length in bars`);
+    if (bars !== null && !(bars >= 1 / 16 && Number.isInteger(bars * 16))) {
+      throw new Error(`Chord "${token}" needs a length in bars that is a whole number of sixteenth-note steps, at least 0.0625 (one step)`);
+    }
     return { symbol, bars };
   });
 }
@@ -86,7 +91,8 @@ export function chordSpans(progression, bars, harmonicRhythm) {
   let at = 0, i = 0;
   while (at < bars * bar) {
     const item = progression[i++ % progression.length];
-    const ticks = Math.min(bars * bar - at, Math.round((item.bars ?? harmonicRhythm) * bar));
+    // At least one sixteenth-note step, so the loop always moves on.
+    const ticks = Math.min(bars * bar - at, Math.max(12, Math.round((item.bars ?? harmonicRhythm) * 16) * 12));
     const chord = parseChord(item.symbol);
     spans.push({ symbol: item.symbol, tick: at, ticks, root: chord.bass ?? chord.root, tones: chordPitchClasses(chord) });
     at += ticks;
@@ -175,11 +181,54 @@ export const leadOps = {
   diminish: m => repeat(diminish(m), 2),
   fragment: (m, k) => sequence(fragment(m, 'first'), k, { step: 1, count: 2 }),
   answer: (m, k) => callAndResponse(m, k).answer,
-  cadence: (m, k) => cadence(m, k, 'authentic'),
-  half_cadence: (m, k) => cadence(m, k, 'half'),
-  hold: (m, k, c) => [{ midi: c.tonicNear, steps: c.steps }],
+  cadence: (m, k, c) => endOn(m, k, 'authentic', c),
+  half_cadence: (m, k, c) => endOn(m, k, 'half', c),
+  // One held note per chord in the phrase: the tonic where the chord has it, otherwise its most stable tone.
+  // Over V then I this plays the 5th then the tonic.
+  hold: (m, k, c) => c.chordsIn().flatMap(({ steps, symbol }) => cadence([{ midi: c.tonicNear, steps }], k, 'authentic', { chord: symbol })),
   rest: () => [],
 };
+// A cadence whose last note lands on a tone of the chord sounding under that note.
+function endOn(m, k, type, c) {
+  const draft = cadence(m, k, type);
+  const lastAt = draft.slice(0, draft.findLastIndex(e => e.midi !== null)).reduce((sum, e) => sum + e.steps, 0);
+  return cadence(m, k, type, { chord: c.chordAt(Math.min(lastAt, c.steps - 1)) });
+}
+// Fit a plan to the phrases a section has room for (a long motif makes fewer, longer phrases).
+// The first phrases keep their ops and the last phrase keeps the plan's last op, so endings are never lost.
+export function fitPlan(plan, room) {
+  if (!Array.isArray(plan) || plan.length <= room) return plan;
+  const ending = ['cadence', 'half_cadence', 'hold'];
+  if (room === 1) return [ending.includes(plan.at(-1)) ? plan.at(-1) : plan.find(op => op !== 'rest') ?? plan[0]];
+  return [...plan.slice(0, room - 1), plan.at(-1)];
+}
+// Move notes that would sound a semitone against another pitched part. Parts are settled in order:
+// bass, harmony, texture, counter. A clashing note tries the octave above and below, then the nearest tone of the
+// chord in its lane; if nothing fits it is dropped. The lead sits in its own lane above all of them.
+const settleOrder = ['bass', 'harmony', 'texture', 'counter'];
+export function resolveClashes(local, tracks, lanes, spans, offset) {
+  const fixed = [];
+  const overlaps = (a, b) => a.tick < b.tick + b.length && b.tick < a.tick + a.length;
+  for (const role of settleOrder) {
+    for (const t of tracks.filter(t => t.role === role)) {
+      const notes = local[t.name];
+      if (!notes) continue;
+      const lane = lanes[role], out = [];
+      for (const n of notes) {
+        const free = m => m >= lane[0] && m <= lane[1] && !fixed.some(f => overlaps(f, n) && Math.abs(f.midi - m) === 1) && !out.some(o => overlaps(o, n) && o.midi === m);
+        if (free(n.midi)) { out.push(n); continue; }
+        const span = spans.find(sp => sp.tick + offset <= n.tick && n.tick < sp.tick + offset + sp.ticks) ?? spans.at(-1);
+        const chordTones = [];
+        for (let m = lane[0]; m <= lane[1]; m++) if (span.tones.includes(mod(m, 12))) chordTones.push(m);
+        chordTones.sort((a, b) => Math.abs(a - n.midi) - Math.abs(b - n.midi));
+        const choice = [n.midi + 12, n.midi - 12, ...chordTones].find(free);
+        if (choice !== undefined) out.push({ ...n, midi: choice });
+      }
+      local[t.name] = out;
+      fixed.push(...out);
+    }
+  }
+}
 export const leadOpNames = Object.keys(leadOps);
 export const counterOps = ['answer', 'guide', 'fragment', 'rest'];
 // Later passes and doubled sections vary the plan instead of repeating it note for note.
@@ -309,11 +358,16 @@ export function buildArrangement(blueprintOrId, { key: keyInput, bpm, lengthBars
 
   // The motif: the agent's own, or the blueprint's scale-degree motif in this key. Placed in the lead lane.
   const read = fitKey(readMotif(motifInput ?? b.motif, key), key);
-  if (!pitches(read.events).length) throw new Error('The motif needs at least one note');
+  const motifPitches = pitches(read.events);
+  if (!motifPitches.length) throw new Error('The motif needs at least one note');
+  const width = Math.max(...motifPitches) - Math.min(...motifPitches);
+  if (width > 24) throw new Error(`The motif spans ${width} semitones. Keep it within two octaves so it fits the lead lane.`);
   const phraseSteps = Math.max(b.phraseBars, Math.ceil(totalSteps(read.events) / 16)) * 16;
   const lanes = b.lanes;
   const motif = fitRegister(read.events, lanes.lead[0], lanes.lead[1]);
   const tonicNear = fromDegree(Math.round(degreeOf(Math.round((lanes.lead[0] + lanes.lead[1]) / 2), key) / 7) * 7, key);
+  const adjustments = [];
+  const phrases = [];
 
   const parts = Object.fromEntries(b.tracks.map(t => [t.name, []]));
   const map = [];
@@ -322,70 +376,89 @@ export function buildArrangement(blueprintOrId, { key: keyInput, bpm, lengthBars
   for (const s of sections) {
     const spans = chordSpans(parsed[s.chords ?? 'main'] ?? parsed.main, s.bars, b.harmonicRhythm);
     const offset = start * bar;
+    const sectionSteps = s.bars * 16;
+    const chordAt = step => (spans.find(sp => sp.tick <= step * 12 && step * 12 < sp.tick + sp.ticks) ?? spans.at(-1)).symbol;
     const shiftSpan = sp => ({ ...sp, tick: sp.tick + offset });
-    const plays = new Set();
-    const put = (track, notes) => { if (notes.length) { parts[track.name].push({ section: s.name, bar: start, bars: s.bars, notes: notes.map(n => ({ ...n, tick: n.tick - offset })) }); plays.add(track.role); } };
+    const room = Math.max(1, Math.floor(sectionSteps / phraseSteps));
+    // Phrase windows: the last phrase takes any steps left over, so a section never ends with an unplanned gap.
+    const windows = Array.from({ length: room }, (_, i) => ({ at: i * phraseSteps, steps: i === room - 1 ? sectionSteps - i * phraseSteps : phraseSteps }));
+    const plans = {};
+    for (const part of ['lead', 'counter']) {
+      if (!Array.isArray(s[part])) continue;
+      plans[part] = fitPlan(s[part], room);
+      if (plans[part].length !== s[part].length || plans[part].some((op, i) => op !== s[part][i])) {
+        adjustments.push({ section: s.name, part, planned: s[part], used: plans[part], reason: `the motif is ${phraseSteps / 16} bars long, so the ${s.bars}-bar section has room for ${room} phrase${room > 1 ? 's' : ''}` });
+      }
+      plans[part].forEach((op, i) => phrases.push({ section: s.name, part, op, startTick: offset + windows[i].at * 12, endTick: offset + (windows[i].at + windows[i].steps) * 12 }));
+    }
+    const local = {};
     for (const track of b.tracks) {
       const lane = lanes[track.role];
       const energy = s.energy ?? 2;
+      let notes = [];
       if (track.role === 'drums') {
         const set = b.drums?.[s.drums];
-        const grid = set?.[track.drum];
-        if (!grid) continue;
-        const notes = [];
+        const grid = set?.[track.drum], fill = set?.fills?.[track.drum];
+        if (!grid && !fill) continue;
         if (grid === 'start') notes.push(note(offset, 69, Math.min(track.length ?? 384, s.bars * bar), vel(100, energy)));
         else for (let i = 0; i < s.bars; i++) {
-          const cells = (i === s.bars - 1 && s.bars > 1 && set.fills?.[track.drum]) || grid;
+          // A fill replaces the grid in the last bar; a part with only a fill plays just that bar.
+          const cells = (i === s.bars - 1 && (s.bars > 1 || !grid) && fill) || grid;
+          if (!cells) continue;
           const step = bar / cells.length;
           [...cells].forEach((c, j) => { if (c in gridVelocity) notes.push(note(offset + i * bar + j * step, 69, Math.min(track.length ?? 48, (s.bars - i) * bar - j * step), vel(gridVelocity[c], energy))); });
         }
-        put(track, notes);
       } else if (track.role === 'bass' && s.bass) {
         const figure = bassFigures[s.bass];
-        put(track, spans.flatMap(sp => figure(shiftSpan(sp), lowestIn(sp.root, lane[0]), lane, key)).map(n => ({ ...n, velocity: vel(n.velocity, energy) })));
+        notes = spans.flatMap(sp => figure(shiftSpan(sp), lowestIn(sp.root, lane[0]), lane, key)).map(n => ({ ...n, velocity: vel(n.velocity, energy) }));
       } else if ((track.role === 'harmony' && s.harmony) || (track.role === 'texture' && s.texture)) {
         const styles = track.role === 'harmony' ? harmonyStyles : textureStyles;
         const style = styles[track.role === 'harmony' ? s.harmony : s.texture];
         let previous = (lane[0] + lane[1]) / 2;
-        put(track, spans.flatMap(sp => {
+        notes = spans.flatMap(sp => {
           const chord = voiceInLane(sp.tones, lane, previous);
           previous = chord.reduce((a, m) => a + m, 0) / chord.length;
           return style(shiftSpan(sp), chord, lane, key);
-        }).map(n => ({ ...n, velocity: vel(n.velocity, energy) })));
-      } else if (track.role === 'lead' && Array.isArray(s.lead)) {
-        const notes = [];
-        s.lead.forEach((op, i) => {
-          const at = i * phraseSteps;
-          if (at >= s.bars * 16) return;
-          const chord = spans.find(sp => sp.tick <= at * 12 && at * 12 < sp.tick + sp.ticks)?.symbol ?? spans[0].symbol;
-          const steps = Math.min(phraseSteps, s.bars * 16 - at);
-          const events = op === 'rest' ? [] : keepInLane(fitLength(leadOps[op](motif, key, { chord, steps, tonicNear }), steps), lanes.lead);
-          leadPlan.push({ section: s.name, bar: start + at / 16, op, ...(events.length && pitches(events).length ? { line: formatLine(events, key) } : {}) });
+        }).map(n => ({ ...n, velocity: vel(n.velocity, energy) }));
+      } else if (track.role === 'lead' && plans.lead) {
+        plans.lead.forEach((op, i) => {
+          const { at, steps } = windows[i];
+          const chordsIn = () => spans.filter(sp => sp.tick + sp.ticks > at * 12 && sp.tick < (at + steps) * 12)
+            .map(sp => ({ symbol: sp.symbol, steps: (Math.min(sp.tick + sp.ticks, (at + steps) * 12) - Math.max(sp.tick, at * 12)) / 12 }));
+          const context = { chord: chordAt(at), chordAt: step => chordAt(at + step), chordsIn, steps, tonicNear };
+          const events = op === 'rest' ? [] : keepInLane(fitLength(leadOps[op](motif, key, context), steps), lanes.lead);
+          leadPlan.push({ section: s.name, bar: start + at / 16, op, ...(pitches(events).length ? { line: formatLine(events, key) } : {}) });
           if (pitches(events).length) notes.push(...toNotes(events, { offset: offset + at * 12, velocity: vel(92, energy) }));
         });
-        put(track, notes);
-      } else if (track.role === 'counter' && Array.isArray(s.counter)) {
-        const notes = [];
-        s.counter.forEach((op, i) => {
-          const at = i * phraseSteps;
-          if (at >= s.bars * 16 || op === 'rest') return;
-          const steps = Math.min(phraseSteps, s.bars * 16 - at);
+      } else if (track.role === 'counter' && plans.counter) {
+        plans.counter.forEach((op, i) => {
+          const { at, steps } = windows[i];
+          if (op === 'rest') return;
           let events;
           if (op === 'guide') {
             let previous = (lane[0] + lane[1]) / 2;
-            events = spans.filter(sp => sp.tick >= at * 12 && sp.tick < (at + steps) * 12).map(sp => {
+            events = spans.filter(sp => sp.tick + sp.ticks > at * 12 && sp.tick < (at + steps) * 12).map(sp => {
               const third = [sp.tones[1], sp.tones[0], ...sp.tones].find(pc => pc !== undefined && key.scale.includes(mod(pc - key.tonic, 12))) ?? sp.tones[0];
               const midi = placeNear(third, lane[0], lane[1], previous);
               previous = midi;
-              return { midi, steps: Math.min(sp.ticks, (at + steps) * 12 - sp.tick) / 12 };
+              const from = Math.max(sp.tick, at * 12);
+              return { midi, steps: (Math.min(sp.tick + sp.ticks, (at + steps) * 12) - from) / 12 };
             });
           } else if (op === 'fragment') events = augment(fragment(motif, 'last'));
           else events = callAndResponse(motif, key).answer;
           events = foldIntoLane(fitLength(events, steps), lane);
           notes.push(...toNotes(events, { offset: offset + at * 12, velocity: vel(op === 'guide' ? 70 : 80, energy), gate: op === 'guide' ? 0.97 : 0.9 }));
         });
-        put(track, notes);
       }
+      if (notes.length) local[track.name] = notes;
+    }
+    resolveClashes(local, b.tracks, lanes, spans, offset);
+    const plays = new Set();
+    for (const track of b.tracks) {
+      const notes = local[track.name];
+      if (!notes?.length) continue;
+      parts[track.name].push({ section: s.name, bar: start, bars: s.bars, notes: notes.map(n => ({ ...n, tick: n.tick - offset })) });
+      plays.add(track.role);
     }
     map.push({ name: s.name, startBar: start, bars: s.bars, startSeconds: Number((start * secondsPerBar).toFixed(4)), endSeconds: Number(((start + s.bars) * secondsPerBar).toFixed(4)),
       energy: s.energy ?? 2, roles: ['drums', 'bass', 'harmony', 'lead', 'counter', 'texture'].filter(r => plays.has(r)), chords: spans.map(sp => sp.symbol) });
@@ -416,7 +489,11 @@ export function buildArrangement(blueprintOrId, { key: keyInput, bpm, lengthBars
     motif: { source: motifInput ? 'yours' : 'blueprint', line: formatLine(motif, key), steps: totalSteps(motif), ...(read.snapped ? { snappedToKey: read.snapped } : {}) },
     progressions: Object.fromEntries(Object.entries(parsed).map(([name, list]) => [name, list.map(c => c.symbol + (c.bars ? ':' + c.bars : '')).join(' ')])),
     lanes: Object.fromEntries(Object.entries(lanes).filter(([role]) => b.tracks.some(t => t.role === role))),
-    sections: map, leadPlan, tracks, suggestions,
+    sections: map, leadPlan, phrases, tracks, suggestions,
+    ...(adjustments.length ? { planAdjustments: adjustments } : {}),
+    ...(target !== undefined && Math.abs(start - target) > Math.max(2, target * 0.25)
+      ? { lengthWarning: `No form of this blueprint is near ${Number(target.toFixed(2))} bars; the nearest is ${start} bars (${Number((start * secondsPerBar).toFixed(2))} s). Lengths available at this tempo: ${[...new Set(lengthCandidates(b).map(c => c.bars))].sort((x, y) => x - y).slice(0, 8).join(', ')} bars.` }
+      : {}),
   };
 }
 
@@ -439,13 +516,52 @@ export function registerReport(tracks, lengthBars) {
   }
   return bars.map((s, i) => ({ bar: i, leads: s.lead.size, counters: s.counter.size, leadLow: s.leadLow === Infinity ? null : s.leadLow, supportHigh: s.supportHigh === -Infinity ? null : s.supportHigh }));
 }
+// Notes of different pitched tracks that sound together a semitone apart.
+export function semitoneClashes(tracks) {
+  const notes = tracks.filter(t => t.role !== 'drums' && t.role !== 'fx')
+    .flatMap(t => t.patterns.flatMap(p => p.notes.map(n => ({ track: t.name, midi: n.midi, start: p.bar * bar + n.tick, end: p.bar * bar + n.tick + n.length }))))
+    .sort((a, b) => a.start - b.start);
+  const clashes = [];
+  for (let i = 0; i < notes.length; i++) {
+    for (let j = i + 1; j < notes.length && notes[j].start < notes[i].end; j++) {
+      const a = notes[i], b = notes[j];
+      if (a.track !== b.track && Math.abs(a.midi - b.midi) === 1) clashes.push({ bar: Math.floor(b.start / bar), tracks: [a.track, b.track], midi: [a.midi, b.midi] });
+    }
+  }
+  return clashes;
+}
+// Lead and counter notes only sound inside phrases whose plan op is not a rest, and the counter's own lines
+// (answer, fragment) only sound where the lead rests.
+export function phraseProblems(arrangement) {
+  const problems = [];
+  const windows = arrangement.phrases ?? [];
+  for (const t of arrangement.tracks.filter(t => t.role === 'lead' || t.role === 'counter')) {
+    for (const p of t.patterns) {
+      for (const n of p.notes) {
+        const at = p.bar * bar + n.tick;
+        const owner = windows.find(w => w.part === t.role && w.startTick <= at && at < w.endTick);
+        if (!owner || owner.op === 'rest') problems.push(`${t.name} sounds at bar ${Math.floor(at / bar)} where its plan says rest`);
+        if (t.role === 'counter' && owner && owner.op !== 'guide') {
+          const lead = windows.find(w => w.part === 'lead' && w.startTick <= at && at < w.endTick);
+          if (lead && lead.op !== 'rest') problems.push(`${t.name} plays its ${owner.op} at bar ${Math.floor(at / bar)} while the lead plays ${lead.op}`);
+        }
+      }
+    }
+  }
+  return [...new Set(problems)];
+}
 export function checkArrangement(arrangement) {
   const problems = [];
+  const leadTracks = arrangement.tracks.filter(t => t.role === 'lead').length, counterTracks = arrangement.tracks.filter(t => t.role === 'counter').length;
+  if (leadTracks > 1) problems.push(`${leadTracks} lead tracks`);
+  if (counterTracks > 1) problems.push(`${counterTracks} counter tracks`);
   for (const slot of registerReport(arrangement.tracks, arrangement.lengthBars)) {
     if (slot.leads > 1) problems.push(`bar ${slot.bar}: ${slot.leads} leads`);
     if (slot.counters > 1) problems.push(`bar ${slot.bar}: ${slot.counters} counter-melodies`);
     if (slot.leadLow !== null && slot.supportHigh !== null && slot.supportHigh >= slot.leadLow) problems.push(`bar ${slot.bar}: a support part reaches the lead register`);
   }
+  for (const c of semitoneClashes(arrangement.tracks).slice(0, 5)) problems.push(`bar ${c.bar}: ${c.tracks.join(' and ')} sound a semitone apart (MIDI ${c.midi.join(' and ')})`);
+  problems.push(...phraseProblems(arrangement));
   return problems;
 }
 

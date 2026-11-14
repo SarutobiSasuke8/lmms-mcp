@@ -33,7 +33,7 @@ Notes outside the key are moved to the nearest scale tone first, and the result 
 | `rhythm` | The same notes in the same order, so the same contour, with a new rhythm in the same total length (`dotted`, `swap` or `even`). Rests stay where they are. |
 | `fragment_first`, `fragment_last` | The first or last cell: the notes before or after the note boundary nearest the middle. |
 | `call_response` | The statement, ending open on the 2nd or 5th, then an answer that keeps the opening, mirrors the second half and ends on the tonic. |
-| `cadence`, `half_cadence` | The ending rewritten to land on the tonic or the 5th by step, with any trailing rest folded into the held last note. |
+| `cadence`, `half_cadence` | The ending rewritten to land on the tonic or the 5th by step, with any trailing rest folded into the held last note. Pass `chord` (the chord under the last note) and the ending lands on a tone of that chord instead: the tonic or 5th when the chord has it, otherwise its most stable scale degree. |
 
 Each variation comes back with its `line`, length in `steps` and `bars`, and lowest and highest note. Paste a line into a pattern as `melody: { line, repeat: false }`.
 
@@ -42,6 +42,9 @@ Each variation comes back with its `line`, length in `steps` and `bars`, and low
 - Every track gets a `role`, stored on the track as `mcp-role`.
 - At most one lead and one counter-melody sound in any bar.
 - Bass, harmony, texture and counter parts stay below the lead lane, so they never share the lead's register.
+- No two pitched parts sound a semitone apart. Parts are settled in order (bass, harmony, texture, counter): a note that would clash moves an octave, or to the nearest chord tone in its lane, or is left out.
+- Cadences and held endings land on a tone of the chord sounding under them.
+- The counter-melody plays its own lines (answer, fragment) only where the lead rests; `guide` tones may sit under the lead.
 - The lead is the motif: stated first, stated again, then varied by the plan (sequence, inversion, fragment, rhythm change, cadence and so on), with rests between phrases.
 - The song length is pinned to the section total, and the result reports the exact duration in seconds.
 - With no motif or progression given, the blueprint's own are used, written in scale degrees and Roman numerals so they work in any key.
@@ -57,14 +60,14 @@ These rules are asserted in `tools/blueprints.test.mjs` for every blueprint, acr
 | `key` | Such as `E minor`. A bare tonic such as `G` keeps the blueprint's mode. |
 | `bpm` | Tempo. Default: the blueprint's. |
 | `lengthSeconds` or `lengthBars` | Target length. The nearest whole form is chosen: sections at half, normal or double length, the body repeated, or for short loops the intro and only the first body sections. Stingers only change section length. |
-| `motif` | Your motif, in any octave; it is moved into the lead lane. One or two bars works best. |
-| `progression` | Main progression as chord symbols (`Em C G D`) or Roman numerals (`i VI III VII`). `:2` holds a chord for two bars. |
+| `motif` | Your motif, in any octave; it is moved into the lead lane. One or two bars works best, within two octaves. A longer motif makes longer phrases, so a section has room for fewer of them: the plan keeps its first ops and its last op (so cadences and the stinger ending survive), and `planAdjustments` in the result says what changed. |
+| `progression` | Main progression as chord symbols (`Em C G D`) or Roman numerals (`i VI III VII`). `:2` holds a chord for two bars; lengths must be whole sixteenth-note steps (`:0.5`, `:0.25`, at least `:0.0625`). |
 | `contrastProgression` | Progression for the contrasting sections. Default: the blueprint's, in your key. |
 | `sounds` | `default` uses the blueprint voices. `suggested` swaps pitched tracks for the best measured factory preset for their role. |
 
 ### Result
 
-The save result plus: `key`, `bpm`, `lengthBars`, `lengthSeconds`, the requested length, the `form` used, the `motif` as placed in the lead lane, the `progressions`, the register `lanes`, the `sections` map (name, `startBar`, `bars`, start and end seconds, energy, roles playing and chords), the `leadPlan` (the operation and line for each lead phrase), the `tracks` (role, voice, volume, pan, lane and patterns), sound `suggestions` from the catalogue for each pitched track, and next steps.
+The save result plus: `key`, `bpm`, `lengthBars`, `lengthSeconds`, the requested length, the `form` used, the `motif` as placed in the lead lane, the `progressions`, the register `lanes`, the `sections` map (name, `startBar`, `bars`, start and end seconds, energy, roles playing and chords), the `leadPlan` (the operation and line for each lead phrase), the `tracks` (role, voice, volume, pan, lane and patterns), sound `suggestions` from the catalogue for each pitched track, the `phrases` (where each lead and counter op starts and ends, in ticks), `planAdjustments` when a long motif changed a plan, a `lengthWarning` when no form is near the requested length, and next steps.
 
 ## The blueprints
 
@@ -111,13 +114,14 @@ Blueprints are data in `tools/blueprints.json`. Add one by adding an object to `
 ```
 
 - `kind`: `loop` or `stinger`.
-- `phraseBars`: the length of one lead phrase. Section lengths must be whole phrases. A motif longer than a phrase stretches the phrase.
+- `phraseBars`: the length of one lead phrase. Section lengths must be whole phrases. A motif longer than a phrase stretches the phrase; the last phrase in a section takes any bars left over.
 - `harmonicRhythm`: bars per chord unless a chord says otherwise (`I:2`).
 - `lanes`: MIDI note ranges per role. Bass, harmony, counter and texture lanes must span at least an octave and sit below the lead lane's lowest note. Defaults: bass 33-55, harmony 48-64, counter 53-65, texture 52-64, lead 67-88.
+- `masterVolume`: the LMMS master volume. Default 66, which leaves headroom; the battle blueprint uses 58.
 - `motif`: scale degrees 1 to 7 with `:steps`, `'` for an octave up, `,` for an octave down and `r` for a rest. It must fit in one phrase.
-- `progressions`: named progressions in Roman numerals. Numerals count degrees of the key's own mode; upper case is major, lower case minor, `o` diminished, then optional `7`, `maj7`, `sus4` and so on; `b` or `#` moves the root. `main` is used unless a section names another with `chords`. Default progressions must be diatonic to the blueprint key (the tests check this). If someone picks a key in another mode, the blueprint's numerals take that mode's chord qualities so the chords stay in the key; numerals passed in by the caller are read as written.
+- `progressions`: named progressions in Roman numerals. Numerals count degrees of the key's own mode; upper case is major, lower case minor, `o` diminished, then optional `7`, `maj7`, `sus4` and so on; `b` or `#` is read against the major scale, as usual (in E minor `bVII` is D and `bIII` is G), and spells the chord with flats or sharps. `main` is used unless a section names another with `chords`. Default progressions must be diatonic to the blueprint key (the tests check this). If someone picks a key in another mode, the blueprint's numerals take that mode's chord qualities so the chords stay in the key; numerals passed in by the caller are read as written.
 - `tracks`: `name`, `role` (drums, bass, harmony, lead, counter, texture), and a voice as in `create_project` (`pluck`, `bass`, `pad`, `sample` with `factorySample`, or `preset` with `preset`). Give `volume`, or for a preset a `level`: the target peak in dBFS for one note, turned into a volume from the measured catalogue. Drum tracks name their `drum` part and a note `length` in ticks. `prefer` lists catalogue tags that rank sound suggestions. A blueprint has exactly one lead track and at most one counter track.
-- `drums`: named sets mapping a drum part to a 16-step grid for one bar (`X` accent, `x` hit, `o` soft, `g` ghost, `-` rest), or `"start"` for a single hit at the section start. `fills` replace a part's grid in the last bar of a section.
+- `drums`: named sets mapping a drum part to a 16-step grid for one bar (`X` accent, `x` hit, `o` soft, `g` ghost, `-` rest), or `"start"` for a single hit at the section start. `fills` replace a part's grid in the last bar of a section; a part with only a fill (no grid) plays just that bar.
 - `intro`, `body` and an optional `outro`: lists of sections. Only the body repeats.
 
 Each section has `name`, `bars`, `energy` (1 calm, 2 normal, 3 busy; it scales velocities and should match how much is playing) and the parts that play. A part plays only when its field is set:
@@ -128,7 +132,7 @@ Each section has `name`, `bars`, `energy` (1 calm, 2 normal, 3 busy; it scales v
 | `bass` | `whole`, `half`, `quarters`, `eighths`, `octaves`, `syncopated`, `pedal` (tonic under every chord). |
 | `harmony` | `block`, `pulse` (quarter-note chords), `stabs` (off-beat chords), `arp` (eighth-note broken chords), `hits` (one short chord per change). |
 | `texture` | `arp` (sixteenth-note chord tones), `shimmer` (eighth-note chord tones), `drone` (tonic and fifth). |
-| `lead` | `"rest"` or one op per phrase: `state`, `repeat`, `sequence_up`, `sequence_down`, `fit` (fit to the chord at the phrase start), `invert`, `retrograde`, `rhythm`, `augment`, `diminish`, `fragment`, `answer`, `cadence`, `half_cadence`, `hold` (the tonic held), `rest`. |
+| `lead` | `"rest"` or one op per phrase: `state`, `repeat`, `sequence_up`, `sequence_down`, `fit` (fit to the chord at the phrase start), `invert`, `retrograde`, `rhythm`, `augment`, `diminish`, `fragment`, `answer`, `cadence`, `half_cadence`, `hold` (one held note per chord: the tonic where the chord has it, so V then I plays the 5th then the tonic), `rest`. |
 | `counter` | One op per phrase: `answer` (the motif's answer, best where the lead rests), `guide` (held chord thirds under the lead), `fragment` (the last cell, augmented), `rest`. |
 | `chords` | Which named progression the section uses. Default `main`. |
 
@@ -144,5 +148,6 @@ For each pitched track the tool ranks native factory presets from the measured c
 - no clipped samples;
 - `analyze_audio` with the returned section map finds no silent section (every section above -45 dBFS RMS);
 - the loudness range between sections is at most 14 LU, overall loudness is between -30 and -8 LUFS, and the busiest sections are not quieter than the calmest.
+- the 2-6 kHz band is within 16 dB of the 500 Hz-2 kHz band, so the default sounds are not dull (the dungeon blueprint is the darkest by design and sits near this limit).
 
 These are measurements. Nobody has listened to the results, so musical quality beyond these checks is not verified. Set `BLUEPRINTS=town,boss` to check only some blueprints.
