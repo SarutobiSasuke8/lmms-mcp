@@ -20,11 +20,12 @@ const lmms = process.env.LMMS_EXECUTABLE ??
   (process.platform === 'win32' ? 'C:/Program Files/LMMS/lmms.exe' : 'lmms');
 const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(path.dirname(lmms), 'data', 'presets'));
 const pluginDirectory = path.resolve(process.env.LMMS_PLUGINS ?? path.join(path.dirname(lmms), 'plugins'));
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.5.0' });
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.6.0' });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
 const wavName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.wav$/i);
+const timelineTick = z.number().int().min(0).max(2147483647);
 const patchId = z.enum(Object.keys(fathomPatches));
 const note = z.object({
   tick: z.number().int().min(0), length: z.number().int().min(1),
@@ -506,6 +507,7 @@ tool('inspect_arrangement', 'Read tempo, meter, mixer routes, instrument types a
           children(track, tag).map(clip => ({
             type: tag, name: clip.getAttribute('name'), tick: Number(clip.getAttribute('pos')),
             length: Number(clip.getAttribute('len')),
+            ...(tag === 'sampletco' ? { source: clip.getAttribute('src'), muted: clip.getAttribute('muted') === '1' } : {}),
             ...(tag === 'automationpattern' ? {
               points: children(clip, 'time').map(point => ({
                 tick: Number(point.getAttribute('pos')), value: Number(point.getAttribute('value')),
@@ -668,6 +670,61 @@ tool('edit_clip', 'Move, duplicate, rename or remove an instrument pattern in a 
     const clip = operation === 'duplicate' ? target.appendChild(original.cloneNode(true)) : original;
     clip.setAttribute('pos', String(destinationTick));
     if (name) clip.setAttribute('name', name);
+  }
+  return save(doc, output);
+});
+tool('edit_sample_clip', 'Place, move, duplicate, resize, mute, relink or remove a native sample clip in a saved project copy. Positions and lengths use LMMS ticks.', {
+  project: projectName, output: projectName, trackName: z.string().min(1).max(100),
+  operation: z.enum(['place', 'move', 'duplicate', 'resize', 'mute', 'relink', 'remove']),
+  tick: timelineTick, destinationTick: timelineTick.optional(), length: timelineTick.min(1).optional(),
+  file: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.(wav|ogg|flac)$/i).optional(),
+  muted: z.boolean().optional(),
+}, async ({ project, output, trackName, operation, tick, destinationTick, length, file, muted }) => {
+  if ((operation === 'move' || operation === 'duplicate') !== (destinationTick !== undefined) ||
+      (operation === 'place' || operation === 'resize') !== (length !== undefined) ||
+      (operation === 'place' || operation === 'relink') !== (file !== undefined) ||
+      (operation === 'mute') !== (muted !== undefined)) {
+    throw new Error('Supply destinationTick for move/duplicate, length for place/resize, file for place/relink, or muted for mute');
+  }
+  const doc = await load(project);
+  const matches = tracks(doc).filter(track => track.getAttribute('type') === '2' && track.getAttribute('name') === trackName);
+  if (matches.length > 1 || (!matches.length && operation !== 'place')) throw new Error('Expected one matching sample track');
+  let [target] = matches;
+  const clips = children(target, 'sampletco');
+  const at = position => clips.filter(clip => Number(clip.getAttribute('pos')) === position);
+  const originals = at(tick);
+  if (operation === 'place' ? originals.length : originals.length !== 1) {
+    throw new Error(operation === 'place' ? 'Sample clip position is occupied' : 'Expected one sample clip at that tick');
+  }
+  if (destinationTick !== undefined && at(destinationTick).length) throw new Error('Destination tick is occupied');
+  const [original] = originals;
+  const start = destinationTick ?? tick;
+  const span = length ?? Number(original?.getAttribute('len'));
+  if (operation !== 'remove' && (!Number.isSafeInteger(span) || span < 1 || start + span > 2147483647)) {
+    throw new Error('Sample clip exceeds the LMMS timeline or has an invalid length');
+  }
+  let source;
+  if (file) {
+    const filename = path.join(root, file);
+    if (!(await lstat(filename)).isFile()) throw new Error('Expected a regular workspace audio file');
+    source = filename.replaceAll('\\', '/');
+  }
+  if (!target) {
+    const [song] = children(doc.documentElement, 'song');
+    const [container] = children(song, 'trackcontainer');
+    if (!container) throw new Error('Expected a song track container');
+    target = add(container, 'track', { type: 2, name: trackName, muted: 0, solo: 0 });
+  }
+  if (operation === 'remove') target.removeChild(original);
+  if (operation === 'place') add(target, 'sampletco', { pos: tick, len: length, muted: 0, src: source });
+  if (operation === 'move') original.setAttribute('pos', String(destinationTick));
+  if (operation === 'duplicate') target.appendChild(original.cloneNode(true)).setAttribute('pos', String(destinationTick));
+  if (operation === 'resize') original.setAttribute('len', String(length));
+  if (operation === 'mute') original.setAttribute('muted', muted ? '1' : '0');
+  if (operation === 'relink') {
+    original.setAttribute('src', source);
+    original.removeAttribute('data');
+    original.removeAttribute('sample_rate');
   }
   return save(doc, output);
 });
@@ -897,6 +954,24 @@ if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe
     ...token, target_type: z.enum(['track', 'mixer']), target_index: index, effect_index: index,
     enabled: z.boolean().optional(), wet: z.number().min(-1).max(1).optional(),
   }, async args => bridgeCall('update_effect', args));
+  tool('live_parameters', 'Read native LMMS parameter names, model IDs, values and ranges from the open song. Refresh after replacing a project or plugin.', {
+    ...token, target_type: z.enum(['song', 'track', 'instrument', 'mixer', 'effect']),
+    target_index: index.optional(), container: z.enum(['song', 'bb']).optional(),
+    effect_index: index.optional(), effect_target_type: z.enum(['track', 'mixer']).optional(),
+  }, async args => {
+    const { target_type: type, target_index: targetIndex,
+      effect_index: effectIndex, effect_target_type: effectType, container } = args;
+    if ((type === 'effect') !== (effectIndex !== undefined && effectType !== undefined) ||
+        (type !== 'effect' && (effectIndex !== undefined || effectType !== undefined))) {
+      throw new Error('Provide effect_index and effect_target_type only for an effect target');
+    }
+    const usesTrack = type === 'track' || type === 'instrument';
+    if ((type !== 'song') !== (targetIndex !== undefined) ||
+        (container && !usesTrack && effectType !== 'track')) {
+      throw new Error('Provide target_index for a track, instrument, mixer or effect');
+    }
+    return bridgeCall('get_parameters', args);
+  });
   tool('live_create_track', 'Create a native song track or an instrument lane in the Beat/Bassline editor.', {
     ...token, type: z.enum(['instrument', 'sample', 'automation', 'bb']), container: z.enum(['song', 'bb']).optional(),
     name: z.string().min(1).max(256).optional(), instrument: z.string().min(1).max(120).optional(),

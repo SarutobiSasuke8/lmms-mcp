@@ -10,7 +10,7 @@ Install Node.js 22 or newer. From a checkout run `./setup-windows.ps1`. It insta
 
 Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. Set `LMMS_EXECUTABLE` for a custom executable path and `LMMS_PRESETS` for a custom preset directory. The tested combination is Node.js 22 and LMMS 1.2.2 on Windows x64.
 
-For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.5.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately.
+For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.6.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately.
 
 | Tool | Purpose |
 | --- | --- |
@@ -20,6 +20,7 @@ For an install that follows a fixed GitHub release, run `npx -y https://github.c
 | `read_pattern` | Read the pitches, timing and velocities of an existing clip |
 | `replace_pattern` | Save a revised clip in a new project copy |
 | `edit_clip` | Move, duplicate, rename or remove an instrument pattern |
+| `edit_sample_clip` | Place, move, duplicate, resize, mute, relink or remove a sample clip |
 | `inspect_effects` / `edit_effect` | Inspect a track effects chain, add Delay or EQ, and set wet mix, bypass or remove effects |
 | `save_project_copy` | Copy a saved project between MMP and MMPZ |
 | `set_project_tempo` | Set static BPM in a new project copy |
@@ -98,6 +99,10 @@ Stem export uses LMMS track rendering. It trims or pads each take to the mix len
 The optional Windows transport adapter uses a separately built [LMMS Agent Bridge](https://github.com/Jx9x/lmms-mcp-bridge). Launch LMMS with its bridge, then set `LMMS_LIVE_PIPE=lmms-agent-bridge` when starting this server. Where enabled, `live_transport` accepts play, pause, stop and seek. The tool returns the bridge's playback state. The upstream playback-volume cap can lower the master fader and mark your open project as modified when you press play. Saved-project edits and exports work with stock LMMS.
 
 With the same bridge enabled, use `live_inspect` to read project state, arrangement and notes. Pass the returned project token to `live_update_track`, `live_update_clip`, `live_replace_notes` or `live_update_effect`. Take track and clip indices from a fresh arrangement read, particularly after adding or removing tracks in LMMS. Changes appear in the open project and can be saved in LMMS.
+
+Use `live_parameters` to discover current control names, values, ranges and session-local model IDs. Set `target_type` to `song`, `track`, `instrument`, `mixer` or `effect`. Supply `target_index` for every target except `song`. For an effect, also supply `effect_index` and `effect_target_type` (`track` or `mixer`). Get the current token with `live_inspect` and refresh discovery after changing the project or replacing a plugin.
+
+Use `edit_sample_clip` for a saved project's native audio lanes. Select a sample track by name and a clip by its start tick. `place` creates the track if needed and takes a workspace WAV, Ogg or FLAC filename and a timeline length. `move` and `duplicate` take a destination tick, `relink` takes a workspace audio filename, and `resize` changes the saved clip length in ticks. Keep the referenced audio files with the project and relink if their absolute paths change.
 
 Use `live_create_track` for instrument, sample, automation or Beat/Bassline tracks. Create a linked curve with `live_add_automation`, inspect it with `live_read_automation` and replace or upsert points with `live_edit_automation`. The helper links to track volume, panning or pitch.
 

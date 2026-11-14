@@ -32,3 +32,11 @@ Both servers created a native automation track, linked a clip to Bass volume and
 v0.5.0 adds stock instrument discovery and swapping, batch game one-shot processing, and a Fathom Synth offline render with editable LMMS source notes. The catalogue branch adds searchable patch selection and audition WAVs for supported factory presets and Fathom patches.
 
 We have verified the stock LMMS workflow, including the Fathom ladder sweep and aligned stems, on Windows. Jx9x documents broader live parameter editing and additional audio formats. ZipseLu documents broader saved-project editing for sample clips, effects and newer LMMS instruments. Those workflows need equivalent fixtures and current-version tests before making an overall ranking.
+
+## v0.6.0 sample clips and live discovery
+
+Tested on Windows with stock LMMS 1.2.2, Jx9x `5e6f57b` and ZipseLu `e57d9fe`. Each MCP received the same saved project and source WAV for each fixture. The fixtures were a two-track 120 BPM project and the eight-bar Ninja Bomber source arrangement.
+
+- All three placed the sample at tick 192, moved it to tick 384, saved it at 192 ticks long, then removed it. Our saved output and Jx9x's native save used `sampletco`. ZipseLu used `sampleclip`. Stock LMMS 1.2.2 rendered all three. The minimal project's audio at the moved position peaked at −15.2 dBFS in each render.
+- Our live adapter and Jx9x returned identical parameter records for song, track, instrument and mixer targets. The queried targets returned 303 records on the first fixture and 606 on Ninja Bomber, with possible overlap between target scopes. Our adapter rejected a stale project token. ZipseLu's tool list had no live parameter discovery command.
+- Our saved-project tests additionally covered duplication, mute, resize, source relinking and MMPZ round-trip. Jx9x still offers live writes by native model ID and broader live effect and track editing.

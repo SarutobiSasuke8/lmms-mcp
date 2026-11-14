@@ -31,6 +31,24 @@ try {
   }
   const source = await call('inspect_arrangement', { project: 'source.mmp' });
   const trackName = source.tracks[0].name;
+  await call('render_mix', { project: 'source.mmp', output: 'reference.wav' });
+  const editSample = (project, output, operation, tick, extra = {}) =>
+    call('edit_sample_clip', { project, output, trackName: 'Audio fixture', operation, tick, ...extra });
+  await editSample('source.mmp', 'placed.mmp', 'place', 192, { length: 192, file: 'reference.wav' });
+  await editSample('placed.mmp', 'moved.mmpz', 'move', 192, { destinationTick: 384 });
+  await editSample('moved.mmpz', 'duplicated.mmp', 'duplicate', 384, { destinationTick: 192 });
+  await editSample('duplicated.mmp', 'muted.mmp', 'mute', 384, { muted: true });
+  await editSample('muted.mmp', 'resized.mmp', 'resize', 192, { length: 96 });
+  await editSample('resized.mmp', 'relinked.mmp', 'relink', 192, { file: 'reference.wav' });
+  const changed = await call('inspect_arrangement', { project: 'relinked.mmp' });
+  const audio = changed.tracks.find(track => track.name === 'Audio fixture').clips;
+  assert.deepEqual(audio.map(clip => [clip.tick, clip.length, clip.muted]), [[384, 192, true], [192, 96, false]]);
+  assert.ok(audio.every(clip => clip.source.endsWith('/reference.wav')));
+  await editSample('relinked.mmp', 'removed.mmp', 'remove', 384);
+  const removed = await call('inspect_arrangement', { project: 'removed.mmp' });
+  assert.equal(removed.tracks.find(track => track.name === 'Audio fixture').clips.length, 1);
+  const sampleMix = await call('render_mix', { project: 'placed.mmp', output: 'sample-mix.wav' });
+  assert.ok(sampleMix.durationSeconds >= 4 && Number.isFinite(sampleMix.peakDbfs));
   const inventory = await call('list_instruments', {});
   const darkArps = await call('search_sounds', { query: 'dark arp', engine: 'fathom' });
   assert.equal(darkArps.sounds[0].patchId, 'fuse-pluck');
