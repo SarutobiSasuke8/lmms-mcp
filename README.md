@@ -18,8 +18,9 @@ Configure a stdio MCP client with command `node` and the absolute path to `serve
 | `LMMS_FFMPEG` | Path to ffmpeg for OGG output (defaults to `ffmpeg` on the PATH) |
 | `LMMS_RENDER_TIMEOUT_SECONDS` | Fixed render limit; the default scales with song length |
 | `LMMS_PARALLEL_RENDERS` | Renders run side by side for stems and layers (1 to 4, default 3) |
+| `LMMS_SAMPLE_LIBRARIES` | Folder of open SFZ libraries for `convert_sfz` (optional, see [docs/sampler.md](docs/sampler.md)) |
 
-For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.7.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
+For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.8.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
 
 On connection, the server sends a short workflow brief through MCP initialization. Call `get_started` for the same guidance, workflow entry points and local configuration. The MCP tool list documents exact parameters, including optional live tools when configured.
 
@@ -35,6 +36,12 @@ Stem, layer and full-song renders can take a minute or more. Give your MCP clien
 | Listen | `analyze_audio`, `render_mix`, `render_stems` |
 | Deliver | `export_game_audio`, `export_one_shots`, `export_midi`, `save_project_copy` |
 | Read | `inspect_project`, `inspect_arrangement`, `read_pattern` |
+| Start fast | `list_blueprints`, `create_from_blueprint`, `develop_motif` ([docs/blueprints.md](docs/blueprints.md)) |
+| Check | `set_track_role`, `lint_arrangement`, `quality_report` ([docs/arranger-lint.md](docs/arranger-lint.md)) |
+| Balance | `auto_balance`, `compare_to_reference` ([docs/balance.md](docs/balance.md)) |
+| Loops | `find_loop_points`, `prepare_loop` ([docs/loop-prep.md](docs/loop-prep.md)) |
+| Audition | `build_audition_page`, `read_feedback`, `remember_taste`, `get_taste` ([docs/audition.md](docs/audition.md)) |
+| External instruments | `list_external_tools`, `render_vst3_stems`, `convert_sfz` ([docs/sampler.md](docs/sampler.md)) |
 
 A beat has 48 ticks and a 4/4 bar has 192. Bars start at zero. Files use simple names in the workspace, and existing files are protected from overwrites unless a tool says otherwise.
 
