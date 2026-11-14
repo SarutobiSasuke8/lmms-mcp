@@ -31,7 +31,11 @@ try {
   }
   const source = await call('inspect_arrangement', { project: 'source.mmp' });
   const profiles = await call('list_composer_profiles', {});
-  assert.equal(profiles.length, 8);
+  assert.equal(profiles.length, 11);
+  assert.match(client.getInstructions(), /get_started/);
+  const start = await call('get_started', {});
+  const tools = new Set((await client.listTools()).tools.map(tool => tool.name));
+  assert.ok(Object.values(start.workflows).flat().every(name => tools.has(name)));
   assert.equal((await call('list_composer_profiles', { query: 'nobuo uematsu' }))[0].id, 'jrpg-battle');
   for (const profile of profiles) {
     const sketch = await call('create_composer_sketch', { profileId: profile.id, output: profile.id + '.mmp' });

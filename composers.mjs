@@ -1,4 +1,31 @@
 export const composerProfiles = {
+  grieg: {
+    id: 'grieg', name: 'Grieg — Mountain Crossing', reference: 'Edvard Grieg',
+    tags: ['folklore', 'dance', 'mountain', 'exploration'],
+    technique: 'Put a lilting modal tune over an open-fifth drone with short accented pickups.',
+    use: 'Mountain routes and folklore encounters.', patchId: 'relay-bell',
+    harmony: [[0,3,7,10],[0,5,7,9],[0,3,7,10],[0,2,7,9]],
+    motif: [[0,0,20,86],[33,1,10,65],[48,2,32,87],[96,3,16,81],[120,2,19,74],[158,1,12,67],[174,0,12,73]],
+    drums: false,
+  },
+  satie: {
+    id: 'satie', name: 'Satie — Empty Arcade', reference: 'Erik Satie',
+    tags: ['sparse', 'quiet', 'hub', 'ambient'],
+    technique: 'Alternate a low anchor with soft upper chords and leave room between melodic attacks.',
+    use: 'Quiet hubs, pause screens and abandoned spaces.', patchId: 'ember-organ',
+    harmony: [[0,4,7,11],[-3,0,4,7],[-5,-1,2,5],[-3,0,4,7]],
+    motif: [[36,3,45,67],[104,2,33,57],[153,1,25,53]],
+    drums: false,
+  },
+  'rimsky-korsakov': {
+    id: 'rimsky-korsakov', name: 'Rimsky-Korsakov — Palace of Sparks', reference: 'Nikolai Rimsky-Korsakov',
+    tags: ['orchestration', 'register', 'fantasy', 'colour'],
+    technique: 'Pass a running figure between high and low registers while sustained harmony holds the scene together.',
+    use: 'Fantasy reveals, magical machinery and boss entrances.', patchId: 'relay-bell',
+    harmony: [[0,3,6,9],[1,4,7,10],[3,6,9,12],[1,4,7,10]],
+    motif: [[0,0,10,81],[12,1,10,73],[24,2,11,79],[36,3,17,90],[96,3,10,83],[108,2,10,70],[120,1,10,74],[132,0,14,84]],
+    drums: false,
+  },
   "handel": {
     id: "handel",
     name: "Handel — Processional Fanfare",
@@ -117,16 +144,21 @@ export function composeProfile(profile, { root, bars }) {
       const position = (bar * 8 + step) % cell.length;
       return [tick, cell[position], duration, position === 0 ? 84 : 65];
     }) : profile.motif;
-    return motif.map(([tick, degree, duration, velocity]) =>
+    return motif.filter(([tick]) => profile.id !== 'rimsky-korsakov' || tick < 96).map(([tick, degree, duration, velocity]) =>
       notes(tick + (profile.id === 'beethoven' && bar % 2 ? 6 : 0), chord[degree] + (profile.id === 'jrpg-battle' && bar === 2 ? 12 : 0), duration, velocity));
   });
   const counter = voice('Bass and answer', 'bass', 34, (chord, bar) => {
     if (profile.id === 'bach') return profile.motif.slice(0, 6).map(([tick, degree, duration, velocity]) =>
       notes(tick + 48, chord[degree] - 12, duration, velocity - 12));
     if (profile.id === 'mozart') return [0, 2, 1, 2, 0, 2, 1, 2].map((degree, i) => notes(i * 24, chord[degree] - 12, 19, 62));
+    if (profile.id === 'grieg') return [notes(0, chord[0] - 12, 158, 79), notes(0, chord[2] - 12, 158, 64)];
+    if (profile.id === 'satie') return [notes(0, chord[0] - 12, 83, 57)];
+    if (profile.id === 'rimsky-korsakov') return profile.motif.filter(([tick]) => tick >= 96)
+      .map(([tick, degree, duration, velocity]) => notes(tick, chord[degree] - 12, duration, velocity));
     return [notes(0, chord[0] - 12, 68, 79), notes(96, chord[bar % 2 ? 2 : 0] - 12, 65, 67)];
   });
-  const harmony = voice('Harmony', 'pad', 24, chord => chord.slice(1, 3).map(pitch => notes(0, pitch, 142, 59)));
+  const harmony = voice('Harmony', 'pad', 24, chord => chord.slice(1, 3).map(pitch =>
+    profile.id === 'satie' ? notes(48, pitch, 114, 48) : notes(0, pitch, 142, 59)));
   const tracks = [lead, counter, harmony];
   if (profile.drums) {
     tracks.push(voice('Kick', 'kick', 54, (_, bar) => {
