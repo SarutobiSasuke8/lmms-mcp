@@ -19,7 +19,9 @@ Configure a stdio MCP client with command `node` and the absolute path to `serve
 | `LMMS_RENDER_TIMEOUT_SECONDS` | Fixed render limit; the default scales with song length |
 | `LMMS_PARALLEL_RENDERS` | Renders run side by side for stems and layers (1 to 4, default 3) |
 
-For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.6.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately. Version 0.7.0, described here, is not tagged yet.
+For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.7.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
+
+On connection, the server sends a short workflow brief through MCP initialization. Call `get_started` for the same guidance, workflow entry points and local configuration. The MCP tool list documents exact parameters, including optional live tools when configured.
 
 Stem, layer and full-song renders can take a minute or more. Give your MCP client a tool timeout of at least five minutes.
 
@@ -27,7 +29,7 @@ Stem, layer and full-song renders can take a minute or more. Give your MCP clien
 
 | Area | Tools |
 | --- | --- |
-| Compose | `create_project`, `add_track`, `add_pattern`, `replace_pattern`, `copy_bars`, `edit_clip`, `edit_sample_clip`, `remove_track`, `set_song_length`, `set_project_tempo`, `resolve_chords` |
+| Compose | `list_composer_profiles`, `create_composer_sketch`, `create_project`, `add_track`, `add_pattern`, `replace_pattern`, `copy_bars`, `edit_clip`, `edit_sample_clip`, `remove_track`, `set_song_length`, `set_project_tempo`, `resolve_chords` |
 | Sounds | `search_sounds`, `preview_sound`, `list_samples`, `list_presets`, `list_instruments`, `apply_preset`, `set_native_instrument`, `build_sound_catalogue`, `render_fathom_track` |
 | Mix | `set_track_mix`, `set_master`, `route_mixer_bus`, `set_bus`, `edit_effect`, `inspect_effects`, `list_effects`, `automate_track`, `apply_edits` |
 | Listen | `analyze_audio`, `render_mix`, `render_stems` |
@@ -174,6 +176,12 @@ Save a full Fathom patch object as JSON in the workspace. Supported model IDs ar
 The bridge uses the written pitches, note lengths and velocities. It interpolates cutoff by frequency ratio and updates the worklet every 128 samples. The project copy keeps the muted source piano-roll track for editing and MIDI export and plays the rendered audio from a sample track. Rerun after editing notes, tempo, patch or cutoff, with fresh output filenames. The current bridge renders the dry worklet. Add delay and reverb with `edit_effect`. The audio clip references an absolute WAV path, so relink it when moving the project.
 
 `search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
+
+## Composer profiles
+
+Search for `victory`, `whole-tone`, `counterpoint`, `jrpg`, `minimalism`, `folklore`, `sparse hub` or `orchestration` with `list_composer_profiles`. The 11 profiles include Grieg’s modal drone, Satie’s sparse accompaniment and Rimsky-Korsakov’s register exchanges. Pass a result's ID to `create_composer_sketch` with an output filename, MIDI root, tempo and bar count. The sketch works with stock LMMS and returns a suggested Fathom patch ID for its motif track. Open it in LMMS or render it with `render_mix`.
+
+The profiles are original studies in musical techniques. `jrpg-battle` references [Nobuo Uematsu](https://www.jp.square-enix.com/music/sem/page/MODULATION/en/) and `additive-pulse` references [Philip Glass’s additive process](https://philipglass.com/recordings/two_pages/). The sketches contain original notes and stock LMMS sounds.
 
 ## Codex and Claude Code skill
 

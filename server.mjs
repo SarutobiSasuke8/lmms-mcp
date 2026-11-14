@@ -14,6 +14,7 @@ import { deflateSync, gunzipSync, inflateSync } from 'node:zlib';
 import midiPackage from '@tonejs/midi';
 import { createConnection } from 'node:net';
 import { renderFathom } from './fathom.mjs';
+import { composerProfiles, composeProfile, describeProfile } from './composers.mjs';
 import { fathomPatches, searchSounds, measureInstrument } from './catalogue.mjs';
 import * as dsp from './audio.mjs';
 import { expandPattern, parseChord, voiceChord, bassNote, chordQualities } from './music.mjs';
@@ -28,7 +29,15 @@ const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(dataDirectory
 const samplesDirectory = path.resolve(process.env.LMMS_SAMPLES ?? path.join(dataDirectory, 'samples'));
 const pluginDirectory = path.resolve(process.env.LMMS_PLUGINS ?? path.join(path.dirname(lmms), 'plugins'));
 const ffmpeg = process.env.LMMS_FFMPEG ?? 'ffmpeg';
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.7.0' });
+const instructions = [
+  'LMMS MCP composes, edits, analyses and exports editable game audio using saved LMMS projects.',
+  'Start with get_started for workflow and local capabilities, then use tools/list for exact schemas.',
+  'For a musical brief, list_composer_profiles and create_composer_sketch or create_project. Search and audition sounds with search_sounds and preview_sound.',
+  'Edit and mix with apply_edits. Render before delivery, inspect levels and the loop seam with analyze_audio, then use export_game_audio for loops, layers and stingers.',
+  'Preserve the editable MMP or MMPZ and its referenced samples. A beat is 48 ticks and a 4/4 bar is 192 ticks. Project bars start at zero.',
+  'Stock LMMS handles saved projects. Fathom rendering and Windows live control require optional local components.',
+].join(' ');
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.7.0' }, { instructions });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
@@ -246,6 +255,41 @@ function createSong(bpm, items, mastervol = 86) {
   for (const item of items) addTrack(parent, item);
   return doc;
 }
+const profileId = z.enum(Object.keys(composerProfiles));
+tool('get_started', 'Read the LMMS MCP workflow and discover the local setup before composing, editing or exporting.', {}, async () => ({
+  instructions,
+  workspace: root,
+  setup: {
+    lmmsExecutable: lmms,
+    fathomConfigured: Boolean(process.env.LMMS_FATHOM_WORKLET && existsSync(process.env.LMMS_FATHOM_WORKLET)),
+    liveToolsEnabled: process.platform === 'win32' && /^[a-zA-Z0-9_-]+$/.test(process.env.LMMS_LIVE_PIPE ?? ''),
+  },
+  workflows: {
+    plan: ['list_composer_profiles', 'resolve_chords', 'search_sounds', 'list_samples', 'preview_sound'],
+    compose: ['create_composer_sketch', 'create_project', 'inspect_arrangement', 'apply_edits'],
+    mix: ['inspect_effects', 'list_effects', 'automate_track', 'render_mix', 'analyze_audio'],
+    deliver: ['export_game_audio', 'render_stems', 'export_midi', 'export_one_shots'],
+  },
+}));
+tool('list_composer_profiles', 'Find composer studies by name, musical technique or game use.', {
+  query: z.string().max(120).default(''),
+}, async ({ query }) => {
+  const words = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return Object.values(composerProfiles).map(describeProfile).filter(profile => {
+    const text = Object.values(profile).flat().join(' ').toLowerCase();
+    return words.every(word => text.includes(word));
+  });
+});
+tool('create_composer_sketch', 'Write an original editable LMMS sketch based on a composer profile. Uses stock instruments and suggests a Fathom patch for the motif.', {
+  output: projectName, profileId, root: z.number().int().min(48).max(67).default(60),
+  bpm: z.number().int().min(45).max(240).default(120), bars: z.number().int().min(4).max(16).default(4),
+}, async ({ output, profileId: id, root, bpm, bars }) => {
+  const profile = composerProfiles[id];
+  const items = composeProfile(profile, { root, bars });
+  for (const item of items) track.parse(item);
+  return { ...await save(createSong(bpm, items), output), profile: describeProfile(profile), root, bpm, bars,
+    suggestedFathom: { trackName: 'Motif', patchId: profile.patchId } };
+});
 const declaredBars = items => Math.max(...items.flatMap(item => item.patterns.map(part => part.bar + part.bars)));
 tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 ticks, one beat is 48. Each pattern takes raw notes, a drum step grid, a melody line or a chord progression. Stock drum notes play at original pitch on MIDI 69; give one-shots a note length that covers the sample. The song is pinned to lengthBars (default: the last declared pattern bar) even when its final bars are empty.', {
   output: projectName, bpm: z.number().min(45).max(240), tracks: z.array(track).min(1).max(48),

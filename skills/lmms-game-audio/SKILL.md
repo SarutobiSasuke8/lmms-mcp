@@ -5,7 +5,11 @@ description: Compose, mix, check and export game music and audio with LMMS MCP. 
 
 # LMMS game audio
 
-Work in this order. You cannot hear the result, so measure at every stage and say so when you report.
+Call `get_started` to check the workspace and see which optional engines are configured. Inspect the tool schemas before the first edit or export.
+
+- For a style brief, search `list_composer_profiles` by technique or game use. Create an editable seed with `create_composer_sketch`, then revise its motifs, harmony and arrangement for the scene.
+
+Work in this order. Measure the result and audition it when playback is available.
 
 1. **Plan the form.** Pick tempo, key and a bar count that gives the length you need (bars x 240 / BPM seconds). Name the sections and their bars.
 2. **Choose sounds.** `search_sounds` with a `role` (bass, lead, pad, pluck, bell, drum) and words such as `bright` or `warm`. `list_samples` for stock drums and instruments. Audition with `preview_sound` and read the reported level and pitch.
