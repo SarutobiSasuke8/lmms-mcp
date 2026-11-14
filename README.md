@@ -2,42 +2,135 @@
 
 ![LMMS MCP above a graphite step sequencer with amber and teal pads](art/lmms-mcp.webp)
 
-Create editable music projects, revise a pattern, route tracks, add automation and render a local WAV loop. The MIT-licensed server works with saved `.mmp` and `.mmpz` files and calls the installed LMMS renderer without opening the editor.
+Write game music with an AI agent and get engine-ready files back. The agent composes with chords, drum grids and melody lines, chooses from the whole stock LMMS sound library, mixes with real effects, checks its own work by measurement, and exports seamless loops, intros, adaptive layers and stingers with a manifest. The MIT-licensed server works with saved `.mmp` and `.mmpz` files and calls the installed LMMS renderer without opening the editor.
 
 ## Windows setup
 
 Install Node.js 22 or newer. From a checkout run `./setup-windows.ps1`. It installs the Node dependencies and uses WinGet to install stock LMMS 1.2.2 if needed. For manual setup, run `npm ci` and install [LMMS](https://lmms.io/download). The package contains our server and demo, and setup obtains LMMS from its official distribution.
 
-Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. Set `LMMS_EXECUTABLE` for a custom executable path and `LMMS_PRESETS` for a custom preset directory. The tested combination is Node.js 22 and LMMS 1.2.2 on Windows x64.
+Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. The tested combination is Node.js 22 and LMMS 1.2.2 on Windows x64.
 
-For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.6.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately.
-
-| Tool | Purpose |
+| Variable | Purpose |
 | --- | --- |
-| `create_project` | Create a 4/4 session from named synth and drum tracks and note patterns |
-| `inspect_project` | List tracks, clip positions and note counts |
-| `inspect_arrangement` | Read tempo, metre, mixer sends, instruments, clips and automation points |
-| `read_pattern` | Read the pitches, timing and velocities of an existing clip |
-| `replace_pattern` | Save a revised clip in a new project copy |
-| `edit_clip` | Move, duplicate, rename or remove an instrument pattern |
-| `edit_sample_clip` | Place, move, duplicate, resize, mute, relink or remove a sample clip |
-| `inspect_effects` / `edit_effect` | Inspect a track effects chain, add Delay or EQ, and set wet mix, bypass or remove effects |
-| `save_project_copy` | Copy a saved project between MMP and MMPZ |
-| `set_project_tempo` | Set static BPM in a new project copy |
-| `set_track_mix` | Edit instrument volume, pan, mute or solo |
-| `list_presets` / `apply_preset` | Browse installed XML presets and apply compatible instruments and envelopes |
-| `list_instruments` | Discover known stock instrument plugins on disk, usable preset paths and Fathom bridge setup |
-| `search_sounds` / `preview_sound` | Find stock presets and Fathom patches, then audition them as short WAVs |
-| `list_composer_profiles` / `create_composer_sketch` | Find composition studies by technique or game use and generate an editable seed arrangement |
-| `set_native_instrument` | Swap in a discovered stock instrument while keeping the notes and track controls |
-| `render_fathom_track` | Render editable piano-roll notes through Fathom Atelier with a programmable filter sweep |
-| `route_mixer_bus` | Add a named bus routed to master and assign instrument tracks |
-| `automate_track` | Write a track volume or low-pass cutoff envelope |
-| `render_mix` | Render a 48 kHz stereo loop and report duration, peak, RMS, full-scale samples and boundary jump |
-| `render_stems` | Export individual track WAVs aligned to the mix length |
-| `export_midi` | Export named instrument tracks with pitches, timing and velocity |
+| `LMMS_WORKSPACE` | Folder for projects, renders and exports |
+| `LMMS_EXECUTABLE` | Path to `lmms.exe` when it is not in Program Files |
+| `LMMS_PRESETS`, `LMMS_SAMPLES`, `LMMS_PLUGINS` | Custom preset, sample and plugin folders |
+| `LMMS_FFMPEG` | Path to ffmpeg for OGG output (defaults to `ffmpeg` on the PATH) |
+| `LMMS_RENDER_TIMEOUT_SECONDS` | Fixed render limit; the default scales with song length |
+| `LMMS_PARALLEL_RENDERS` | Renders run side by side for stems and layers (1 to 4, default 3) |
 
-## Export and playback
+For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.6.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately. Version 0.7.0, described here, is not tagged yet.
+
+Stem, layer and full-song renders can take a minute or more. Give your MCP client a tool timeout of at least five minutes.
+
+## Tools
+
+| Area | Tools |
+| --- | --- |
+| Compose | `create_project`, `add_track`, `add_pattern`, `replace_pattern`, `copy_bars`, `edit_clip`, `edit_sample_clip`, `remove_track`, `set_song_length`, `set_project_tempo`, `resolve_chords` |
+| Sounds | `search_sounds`, `preview_sound`, `list_samples`, `list_presets`, `list_instruments`, `apply_preset`, `set_native_instrument`, `build_sound_catalogue`, `render_fathom_track` |
+| Mix | `set_track_mix`, `set_master`, `route_mixer_bus`, `set_bus`, `edit_effect`, `inspect_effects`, `list_effects`, `automate_track`, `apply_edits` |
+| Listen | `analyze_audio`, `render_mix`, `render_stems` |
+| Deliver | `export_game_audio`, `export_one_shots`, `export_midi`, `save_project_copy` |
+| Read | `inspect_project`, `inspect_arrangement`, `read_pattern` |
+
+A beat has 48 ticks and a 4/4 bar has 192. Bars start at zero. Files use simple names in the workspace, and existing files are protected from overwrites unless a tool says otherwise.
+
+## Composing
+
+Every pattern takes exactly one of four inputs.
+
+```json
+{"name": "Beat", "bar": 0, "bars": 4, "steps": {"grid": "X---x---X-x-x---"}}
+{"name": "Tune", "bar": 0, "bars": 4, "melody": {"line": "D5:3 F5:3 A5:6 G5:2 F5:2 | G5:3 F5:3 D5:6 r:4"}}
+{"name": "Chords", "bar": 0, "bars": 8, "chords": {"progression": "Dm Bb F C", "style": "arp", "order": "updown", "rate": 2}}
+{"name": "Raw", "bar": 0, "bars": 1, "notes": [{"tick": 0, "length": 44, "midi": 62, "velocity": 90}]}
+```
+
+- **Step grids** tile to fill the pattern. `X` is an accent, `x` a hit, `o` soft, `g` a ghost note and `-` a rest. The default is 16 steps per bar.
+- **Melody lines** are `NOTE:steps` tokens, with an optional `:velocity`. `r:4` is a rest and `[D4,F4,A4]:8` is a chord. The line repeats to fill the pattern.
+- **Chord progressions** take one chord per bar (`Dm:2` lasts two bars) and loop. `style` is `block`, `pulse`, `arp` or `bass`. Voice leading keeps chords in one register. `resolve_chords` shows the notes before you commit.
+- `swing`, `humanize`, `stepsPerBar` and `transpose` are available on the generated inputs.
+
+LMMS sizes a clip from its last note, so empty bars at the end of a song normally vanish. `create_project` pins the song to `lengthBars` (by default the last declared pattern bar), and `set_song_length` changes it later. A 45-bar loop stays 45 bars.
+
+`copy_bars` repeats a section across tracks. `add_track` and `add_pattern` extend a saved project.
+
+Use `edit_sample_clip` for a saved project's native audio lanes. Select a sample track by name and a clip by its start tick. `place` creates the track if needed and takes a workspace WAV, Ogg or FLAC filename and a timeline length. `move` and `duplicate` take a destination tick, `relink` takes a workspace audio filename, and `resize` changes the saved clip length in ticks. Keep the referenced audio files with the project and relink if their absolute paths change.
+
+## Sounds
+
+- `list_samples` browses the stock sample library (about 1,000 files). Use a result as `factorySample` on a `voice: "sample"` track, for example `drums/snare01.ogg`. Workspace WAVs work too, including one folder down, so a kit made by `export_one_shots` can be used directly.
+- `voice: "preset"` loads a factory preset at creation. `apply_preset` changes it later. Both read current and older `.xpf` files and ZynAddSubFX `.xiz` patches (954 in stock LMMS).
+- Some presets are saved at another base note and sound up to two octaves away from the written pitch. The default `tuning: "concert"` corrects the track so written notes sound at pitch. The result reports the measured offset and level. Pass `tuning: "preset"` to keep the preset as saved.
+- `search_sounds` takes a `role` (bass, lead, pad, pluck, bell, keys, strings, brass, organ, drum, fx) and free words. Measured entries carry tags such as `bright`, `percussive` or `slow-attack`, with level and tuning. The package ships measurements for stock LMMS 1.2.2. Run `build_sound_catalogue` to measure a different installation.
+- `preview_sound` renders a short audition of a preset, stock sample or Fathom patch and reports its level and detected pitch.
+
+## Mixing and effects
+
+`edit_effect` adds effects to an instrument track or to a mixer channel such as `Master`. `list_effects` returns every parameter with its range.
+
+| Plugin | Parameters |
+| --- | --- |
+| `delay` | `time` as a note value (`1/4`, `1/8d`, `1/8t`) or seconds, `feedback`, `outputGainDb` |
+| `reverb` | `size`, `dampingHz`, `inputGainDb`, `outputGainDb` |
+| `compressor` | `thresholdDb`, `ratio`, `attackMs`, `releaseMs`, `kneeDb`, `makeupDb` |
+| `limiter` | `ceilingDb`, `inputGainDb`, `releaseSeconds` |
+| `amplifier`, `bassbooster`, `stereo` | Gain and pan, bass boost, stereo width |
+| `eq`, `crossovereq` | Added at flat defaults; shape them in LMMS |
+
+Delay times are worked out from the project tempo when the effect is written. Update the effect after a tempo change. Echo and reverb tails keep ringing after a track goes silent.
+
+`apply_edits` runs many edits on one project and saves once. Use it for a whole mixing pass. If any edit fails, nothing is written. Pass `overwrite: true` to update a project in place.
+
+```json
+{
+  "project": "theme.mmp", "output": "theme-mix.mmp",
+  "edits": [
+    {"op": "set_track_mix", "args": {"trackName": "Bass", "volume": 112.5}},
+    {"op": "edit_effect", "args": {"trackName": "Lead", "operation": "add", "plugin": "delay", "wet": 0.25, "params": {"time": "1/8d", "feedback": 0.4}}},
+    {"op": "edit_effect", "args": {"bus": "Master", "operation": "add", "plugin": "limiter"}},
+    {"op": "set_master", "args": {"volume": 70}}
+  ]
+}
+```
+
+Volumes accept fractions. `automate_track` covers volume, pan, pitch, filter cutoff and resonance, with step, linear or smooth curves. `solo` is honoured by renders.
+
+## Listening by measurement
+
+An agent cannot hear. `analyze_audio` reports what it needs to judge a mix: integrated loudness in LUFS (ITU-R BS.1770), true peak, RMS, crest factor, clipped samples, DC offset, stereo correlation, energy in six frequency bands, spectral centroid and the loop seam. Give it `sections` in bars to compare parts of a song, `pitch: true` to detect notes, and `spectrogram` to get a PNG returned as an image. It ends with plain-language warnings, for example a section that will thin out in mono.
+
+`render_mix` reports loudness and true peak with every render. Options:
+
+- `tail: "wrap"` folds the reverb and delay tail back onto the start, so a loop does not cut its own echoes. `tail: "keep"` lets the tail ring out.
+- `targetLufs` and `ceilingDb` master the file with a look-ahead limiter. Game music usually sits near -16 LUFS.
+- An `.ogg` output name writes OGG Vorbis when ffmpeg is installed.
+
+`render_stems` renders one aligned WAV per track, in parallel, for songs of any length.
+
+## Game export
+
+`export_game_audio` writes everything a game engine needs in one call.
+
+```json
+{
+  "project": "theme-mix.mmp", "outputDirectory": "theme", "name": "forest-theme",
+  "introBars": 4, "targetLufs": -16, "ogg": true,
+  "layers": [
+    {"name": "rhythm", "tracks": ["Kick", "Snare", "Bass"]},
+    {"name": "harmony", "tracks": ["Pad", "Arp"]},
+    {"name": "melody", "tracks": ["Lead"]}
+  ],
+  "stingers": [{"name": "victory", "startBar": 43, "bars": 1}]
+}
+```
+
+- **Loop:** the song after the intro, with its tail folded into the start.
+- **Intro:** the opening bars as a one-shot that leads into the loop.
+- **Layers:** aligned loops per group of tracks for adaptive music. They share one gain and are not limited, so they sum to the mix. The manifest records how closely (`layersSumResidualDb`). Effects on Master or shared buses react to the combined signal, so keep effects on individual tracks for layered music.
+- **Stingers:** short cuts from a bar range with a fade.
+- **Manifest:** tempo, bars, loop points in frames, loudness, true peak and a SHA-256 for every file.
 
 Use `export_one_shots` to process up to 32 mono or stereo 48 kHz, 16-bit PCM WAVs in one call. Give each source a unique output name and choose a new output directory. The tool trims quiet edges, adds short fades, matches sample peaks and writes mono WAVs and a JSON manifest. The manifest reports duration, trim offset and measured levels. Peak matching leaves each take's dynamics intact.
 
@@ -53,11 +146,11 @@ Use `export_one_shots` to process up to 32 mono or stereo 48 kHz, 16-bit PCM WAV
 }
 ```
 
-For a saved sampler track, use `create_project` with `voice: "sample"`, a workspace WAV as `sample` and the recorded pitch as `rootMidi`. Trigger the sample at the root for unchanged pitch or use other notes to transpose it. The saved project references that WAV by its absolute path. Use LMMS to relink the source if you move the project to a different machine.
+A sampler track that plays a workspace WAV stores its absolute path. Use LMMS to relink the source if you move the project to a different machine. Stock samples are stored by their library path and move with any LMMS installation.
 
 ## Fathom Atelier
 
-Set `LMMS_FATHOM_WORKLET` to the absolute path of a trusted Fathom Atelier checkout's `public/worklets/synth-processor.js` before launching the MCP. The LMMS MCP package ships the adapter. The synth engine is supplied locally. Use `list_instruments` to check configuration and discover the stock plugin and preset inventory. Set `LMMS_PLUGINS` if your installation stores plugins outside the executable's adjacent `plugins` directory. The inventory checks files on disk. Third-party plugins loaded inside hosts such as Carla or VeSTige need their own inventory.
+Set `LMMS_FATHOM_WORKLET` to the absolute path of a trusted Fathom Atelier checkout's `public/worklets/synth-processor.js` before launching the MCP. The LMMS MCP package ships the adapter. The synth engine is supplied locally. Use `list_instruments` to check configuration and discover the stock plugin and preset inventory. The inventory checks files on disk. Third-party plugins loaded inside hosts such as Carla or VeSTige need their own inventory.
 
 Save a full Fathom patch object as JSON in the workspace. Supported model IDs are `fathom`, `vesper` and `halo`. Call `render_fathom_track` with a saved 4/4 project at a static tempo.
 
@@ -78,9 +171,9 @@ Save a full Fathom patch object as JSON in the workspace. Supported model IDs ar
 }
 ```
 
-The bridge uses the written pitches, note lengths and velocities. It interpolates cutoff by frequency ratio and updates the worklet every 128 samples. The project copy keeps the muted source piano-roll track for editing and MIDI export and plays the rendered audio from a sample track. Rerun after editing notes, tempo, patch or cutoff, with fresh output filenames. The current bridge renders the dry worklet. Apply delay, chorus and reverb in LMMS as needed. The audio clip references an absolute WAV path, so relink it when moving the project.
+The bridge uses the written pitches, note lengths and velocities. It interpolates cutoff by frequency ratio and updates the worklet every 128 samples. The project copy keeps the muted source piano-roll track for editing and MIDI export and plays the rendered audio from a sample track. Rerun after editing notes, tempo, patch or cutoff, with fresh output filenames. The current bridge renders the dry worklet. Add delay and reverb with `edit_effect`. The audio clip references an absolute WAV path, so relink it when moving the project.
 
-Search for `dark arp`, `sub bass`, `metallic bell` or `warm organ` with `search_sounds`. Audition a result by passing its `patchId` or `preset` and a fresh WAV filename to `preview_sound`. Reuse the same patch ID in `render_fathom_track` or the same preset path in `apply_preset`. Stock search covers preset names and families. Some presets need a MIDI root suited to their range.
+`search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
 
 ## Composer profiles
 
@@ -92,16 +185,20 @@ The profiles are original studies in musical techniques. `jrpg-battle` reference
 
 Copy [the LMMS game audio skill](skills/lmms-game-audio/SKILL.md) with its directory into `.agents/skills/` for Codex or `.claude/skills/` for Claude Code in your project. Configure the MCP separately using the setup above.
 
-## Roadmap
+## Limits and roadmap
 
-- Expand the sound catalogue with richer native preset tags for timbre, role and genre.
-- Expose bounded, instrument-specific parameters and expand automation beyond cutoff. Save render settings alongside arrangements so edits can be rebounced without reconstructing the render call.
-- Add adaptive game exports with aligned intensity layers, intros, stingers and one-shot manifests.
-- Expand the sound palette with instrument packs first, including sampled guitars, designed drums and voice one-shots. Consider new engines for playing behaviours the packs cannot capture, such as expressive sustained strings.
+- The project builder creates 4/4 sessions at a static tempo. Tempo and master automation are edited in LMMS.
+- OGG output needs ffmpeg. Without it the tools write WAV.
+- Effect parameters written by `edit_effect` are kept in the project. If the project is re-saved in the LMMS editor, `inspect_effects` still lists the effects but no longer shows those parameters.
+- SoundFont (`.sf2`) and VST instruments are not created by this server yet. Stock LMMS for Windows ships no SoundFont.
+- The pitch detector that drives concert tuning reads one clear fundamental. Check `preview_sound` for presets with strong sub-oscillators or detuning.
+- Next: SoundFont tracks, EQ band controls, tempo and master automation, sidechain ducking, and a macOS and Linux test pass.
 
 Keep the native project as the editable master. MIDI exports instrument patterns and non-overlapping Beat/Bassline clips at a static tempo. Drum steps export as sixteenth-note triggers. Synth patches, effects, audio clips and automation stay in the native project. The default `pitchMode: "written"` preserves the piano-roll notes. Select `"playback"` to apply the instrument base note and master pitch offsets. Plugin transposition and pitch modulation remain in the native project.
 
-Stem export uses LMMS track rendering. It trims or pads each take to the mix length, including tracks with shorter patterns. Effects that depend on several tracks playing together can sound different in solo renders.
+Each stem is rendered with the other tracks muted and fitted to the mix length. Effects that depend on several tracks playing together can sound different in solo renders.
+
+## Live session control
 
 The optional Windows transport adapter uses a separately built [LMMS Agent Bridge](https://github.com/Jx9x/lmms-mcp-bridge). Launch LMMS with its bridge, then set `LMMS_LIVE_PIPE=lmms-agent-bridge` when starting this server. Where enabled, `live_transport` accepts play, pause, stop and seek. The tool returns the bridge's playback state. The upstream playback-volume cap can lower the master fader and mark your open project as modified when you press play. Saved-project edits and exports work with stock LMMS.
 
@@ -109,27 +206,24 @@ With the same bridge enabled, use `live_inspect` to read project state, arrangem
 
 Use `live_parameters` to discover current control names, values, ranges and session-local model IDs. Set `target_type` to `song`, `track`, `instrument`, `mixer` or `effect`. Supply `target_index` for every target except `song`. For an effect, also supply `effect_index` and `effect_target_type` (`track` or `mixer`). Get the current token with `live_inspect` and refresh discovery after changing the project or replacing a plugin.
 
-Use `edit_sample_clip` for a saved project's native audio lanes. Select a sample track by name and a clip by its start tick. `place` creates the track if needed and takes a workspace WAV, Ogg or FLAC filename and a timeline length. `move` and `duplicate` take a destination tick, `relink` takes a workspace audio filename, and `resize` changes the saved clip length in ticks. Keep the referenced audio files with the project and relink if their absolute paths change.
-
 Use `live_create_track` for instrument, sample, automation or Beat/Bassline tracks. Create a linked curve with `live_add_automation`, inspect it with `live_read_automation` and replace or upsert points with `live_edit_automation`. The helper links to track volume, panning or pitch.
 
 For your own synth patches, place a compatible LMMS `.xpf` in the workspace and call `live_load_instrument_file` on an instrument track. For voice clips, guitar chops and game sound effects, create an AudioFileProcessor track and load a WAV, Ogg or FLAC file from the workspace. Use a note pattern to sequence the sample. SoundFonts and other native preset formats require a compatible destination instrument.
 
 ## Verification
 
-Run `npm ci` and `node verify-exports.mjs` from source on Windows with LMMS 1.2.2 installed. Pass a native MMP path to exercise a different project with instrument patterns at the start of the arrangement. The script checks clip edits, MIDI readback, effect bypass and stem duration through a real stdio connection.
+- `npm test` runs 13 unit tests for the analysis, composing, effect and catalogue code. It needs no LMMS.
+- `node verify-game-audio.mjs` drives the server over stdio with LMMS 1.2.2 installed. It checks composing input, pinned song length, preset tuning, older presets and ZynAddSubFX patches, batch edits, effect tails, solo, stems, loudness mastering, analysis with a spectrogram, arrangement edits, the game export and sound discovery.
+- `node verify-exports.mjs` checks clip edits, MIDI readback, effect bypass and stem duration. Pass a native MMP path to exercise a different project with instrument patterns at the start of the arrangement.
+- `npm run verify` runs both LMMS scripts.
 
 Set `LMMS_FATHOM_WORKLET` and `LMMS_FATHOM_TEST_PATCH` to the local worklet and a full patch JSON to also verify Fathom cutoff rendering and rebouncing.
 
-See [the comparison notes](COMPARISON.md) for tested workflows and gaps.
-
-A beat has 48 ticks and a bar has 192 ticks. Bars start at zero. MIDI note 69 triggers a drum sample at its original pitch. Files use simple names in the workspace. Existing output files are protected from overwrites. Open the resulting MMP in LMMS to edit notes, choose other instruments or mix before exporting.
+See [the comparison notes](COMPARISON.md) for tested workflows, a survey of other LMMS servers and known gaps.
 
 Run `npm run demo -- output/demo` to create and render two variants via the MCP. Use a fresh output folder on each run. The demo uses stock LMMS drums and built-in synthesis.
 
 Run `node demo.mjs output/japanese --japanese` for a Japanese-inspired take with a D, E-flat, G, A and B-flat pitch palette, more space between plucked notes and sparser kick accents. The demo uses electronic synths and drums. To get closer to acoustic koto or taiko, choose suitable patches or cleared samples in LMMS.
-
-This alpha targets saved-session editing, compatible factory XML presets and local rendering. The project builder creates 4/4 sessions. Use LMMS for live editing, third-party instruments, detailed effect parameters and linked controls.
 
 ## Licence
 

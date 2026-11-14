@@ -40,3 +40,27 @@ Tested on Windows with stock LMMS 1.2.2, Jx9x `5e6f57b` and ZipseLu `e57d9fe`. E
 - All three placed the sample at tick 192, moved it to tick 384, saved it at 192 ticks long, then removed it. Our saved output and Jx9x's native save used `sampletco`. ZipseLu used `sampleclip`. Stock LMMS 1.2.2 rendered all three. The minimal project's audio at the moved position peaked at −15.2 dBFS in each render.
 - Our live adapter and Jx9x returned identical parameter records for song, track, instrument and mixer targets. The queried targets returned 303 records on the first fixture and 606 on Ninja Bomber, with possible overlap between target scopes. Our adapter rejected a stale project token. ZipseLu's tool list had no live parameter discovery command.
 - Our saved-project tests additionally covered duplication, mute, resize, source relinking and MMPZ round-trip. Jx9x still offers live writes by native model ID and broader live effect and track editing.
+
+## v0.7.0 game-audio suite and a survey of other servers
+
+14 November 2026. v0.7.0 adds composing input (step grids, melody lines, chord progressions), stock samples and ZynAddSubFX patches, concert-tuned presets, effects with parameters on tracks and mixer channels, batch edits, audio analysis with a spectrogram, loop-safe and loudness-mastered renders, parallel stems, and a game export with intro, loop, layers, stingers and a manifest. `verify-game-audio.mjs` checks each of these through stdio against stock LMMS 1.2.2 on Windows.
+
+The table below comes from reading the other servers' READMEs and source listings on the same day. We did not install or run them for this survey, so treat each cell as what the project documents, not as a test result. The earlier sections of this file record what we did run against ZipseLu and Jx9x.
+
+| Capability | This server 0.7.0 | [ZipseLu](https://github.com/ZipseLu/lmms-mcp) | [Jx9x](https://github.com/Jx9x/lmms-mcp-bridge) | [struktured-labs](https://github.com/struktured-labs/lmms-mcp-server) |
+| --- | --- | --- | --- | --- |
+| Analysis the agent can read | LUFS, true peak, bands, pitch, stereo, seam, spectrogram image | None listed | Peak and RMS on render status | Spectrum bands and centroid, voice pitch; no LUFS or spectrogram listed |
+| Loop-safe render, intro and loop split, layers, manifest | Yes | OGG render only | Tail seconds and OGG; no loop fold, stems or manifest listed | OGG and bar-range render |
+| Effects with parameters, master chain | Nine effect types with ranges, on tracks and mixer channels | 18 effect types, wet and enabled only | Live effect and mixer updates; depth not confirmed | Free-form effect parameters on tracks; no mixer or master listed |
+| Batch edits | Any edits, all-or-nothing, one save | Notes only | Notes and pattern placement | Notes list only |
+| Composing input above raw notes | Step grids, melody lines, chord progressions with voice leading | Scale generator | None listed | Chord by root and type, drum step strings |
+| Sound browsing | Stock samples, native and ZynAddSubFX presets, measured role and level tags, audition | ZynAddSubFX preset list | Preset and sample lists with search | General MIDI patch table, SoundFont tools |
+| Live session control | Through the Jx9x bridge | No | Yes, its core strength | No |
+| MIDI export, stems | Both | Neither listed | MIDI export | Neither listed |
+| Automated tests | 13 unit tests and two LMMS scripts; no CI yet | One test file | Offline and live suites | 12 test files and GitHub Actions |
+
+Two more public repositories exist and were set aside: one is a self-described stub that returns fixed values, and one offers six read-only tools.
+
+Where others are ahead, as documented: struktured-labs has SoundFont tools, sung or hummed audio to notes, project versioning, automation helpers and CI. ZipseLu covers more LMMS instruments and effect types, including VST through VeSTige and LMMS 1.3 instruments. Jx9x controls a running session natively. This server has no SoundFont tracks, no CI and no macOS or Linux test pass yet.
+
+Not confirmed by reading: Jx9x's full tool count and effect parameter depth, struktured-labs' reverb and delay parameter names, and whether any project's tests pass.

@@ -1,6 +1,6 @@
 {
   "name": "lmms-mcp",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "license": "MIT",
   "files": [
@@ -8,8 +8,15 @@
     "fathom.mjs",
     "catalogue.mjs",
     "composers.mjs",
+    "audio.mjs",
+    "music.mjs",
+    "effects.mjs",
+    "sound-catalogue.json",
     "skills/",
     "demo.mjs",
+    "test.mjs",
+    "verify-exports.mjs",
+    "verify-game-audio.mjs",
     "art/",
     "COMPARISON.md",
     "setup-windows.ps1"
@@ -21,7 +28,9 @@
     "lmms-mcp": "server.mjs"
   },
   "scripts": {
-    "demo": "node demo.mjs"
+    "demo": "node demo.mjs",
+    "test": "node --test test.mjs",
+    "verify": "node verify-exports.mjs && node verify-game-audio.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

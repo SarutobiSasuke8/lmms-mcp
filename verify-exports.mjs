@@ -118,7 +118,8 @@ try {
   assert.deepEqual(await call('inspect_arrangement', { project: 'trimmed.mmp' }), source);
   await call('edit_effect', { project: 'trimmed.mmp', output: 'effect.mmp', trackName, operation: 'add', plugin: 'delay', wet: .25 });
   await call('edit_effect', { project: 'effect.mmp', output: 'bypass.mmp', trackName, operation: 'update', index: 0, enabled: false });
-  assert.deepEqual(await call('inspect_effects', { project: 'bypass.mmp', trackName }), [{ plugin: 'delay', enabled: false, wet: .25 }]);
+  assert.deepEqual(await call('inspect_effects', { project: 'bypass.mmp', trackName }),
+    [{ index: 0, plugin: 'delay', enabled: false, wet: .25, params: { time: '1/8d', feedback: .35, outputGainDb: 0 } }]);
   await call('edit_effect', { project: 'bypass.mmp', output: 'no-effect.mmp', trackName, operation: 'remove', index: 0 });
   assert.deepEqual(await call('inspect_effects', { project: 'no-effect.mmp', trackName }), []);
   const result = await call('export_midi', { project: 'source.mmp', output: 'song.mid' });
