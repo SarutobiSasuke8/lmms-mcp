@@ -181,7 +181,9 @@ The bridge uses the written pitches, note lengths and velocities. It interpolate
 
 The MCP package includes the VST3 adapter. Install the optional host dependencies and instruments locally to enable it. Use `list_external_tools` to see the upstream links, configured plugins and whether the selected Python has the required packages. The tool reports file presence. A render verifies whether a plugin and preset load successfully.
 
-On Windows, create an isolated Python environment and set its executable and both plugin locations in your MCP client environment:
+On Windows x64 with Python 3.12 installed, run `./setup-vst3-windows.ps1` from the package or checkout. It downloads pinned portable Decent Sampler and Surge XT plug-ins from their publishers, checks their SHA-256 hashes and creates an isolated host environment. Copy the generated `mcp-env.json` entries into your MCP client's environment settings and restart the client. The default destination is `%LOCALAPPDATA%/lmms-mcp/vst3-v1`. Use `-InstallDirectory` with a new directory for a separate install or to retry a failed setup. The command leaves system plug-in folders alone and sample libraries are obtained separately.
+
+For manual setup, create an isolated Python environment and set its executable and both plugin locations in your MCP client environment:
 
 ```powershell
 py -3.12 -m venv .venv-vst3

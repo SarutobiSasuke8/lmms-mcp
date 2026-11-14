@@ -286,7 +286,7 @@ tool('list_external_tools', 'Discover optional renderer dependencies, VST3 instr
       { name: 'LMMS Agent Bridge', use: 'Optional live editing on Windows', env: 'LMMS_LIVE_PIPE', url: 'https://github.com/Jx9x/lmms-mcp-bridge' },
       { name: 'FluidSynth', use: 'Standalone SF2/SF3 MIDI render; manual companion workflow', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
     ],
-    setup: 'See the External VST3 instruments section of the README.' };
+    setup: 'On Windows x64 with Python 3.12, run setup-vst3-windows.ps1 from the package. See the README for manual setup.' };
 });
 tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments. Return aligned stereo WAVs, a mix and a reproducible assignment manifest.', {
   midi: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
