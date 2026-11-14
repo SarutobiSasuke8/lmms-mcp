@@ -10,7 +10,7 @@ Install Node.js 22 or newer. From a checkout run `./setup-windows.ps1`. It insta
 
 Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. Set `LMMS_EXECUTABLE` for a custom executable path and `LMMS_PRESETS` for a custom preset directory. The tested combination is Node.js 22 and LMMS 1.2.2 on Windows x64.
 
-For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.3.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately.
+For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.4.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately.
 
 | Tool | Purpose |
 | --- | --- |
@@ -33,11 +33,13 @@ For an install that follows a fixed GitHub release, run `npx -y https://github.c
 
 ## Export and playback
 
-Keep the native project as the editable master. MIDI exports the notes of instrument patterns at a static tempo. It omits synth patches, effects, automation and Beat/Bassline clips. Drum parts retain their original sample trigger pitches so you can remap them in another DAW.
+Keep the native project as the editable master. MIDI exports the notes of instrument patterns at a static tempo. It omits synth patches, effects, automation and Beat/Bassline clips. The default `pitchMode: "written"` preserves the piano-roll notes. Select `"playback"` to apply the instrument base note and master pitch offsets. Plugin transposition and pitch modulation remain in the native project.
 
 Stem export uses LMMS track rendering. It trims or pads each take to the mix length, including tracks with shorter patterns. Effects that depend on several tracks playing together can sound different in solo renders.
 
 The optional Windows transport adapter uses a separately built [LMMS Agent Bridge](https://github.com/Jx9x/lmms-mcp-bridge). Launch LMMS with its bridge, then set `LMMS_LIVE_PIPE=lmms-agent-bridge` when starting this server. Where enabled, `live_transport` accepts play, pause, stop and seek. The tool returns the bridge's playback state. The upstream playback-volume cap can lower the master fader and mark your open project as modified when you press play. Saved-project edits and exports work with stock LMMS.
+
+With the same bridge enabled, use `live_inspect` to read project state, arrangement and notes. Pass the returned project token to `live_update_track`, `live_update_clip`, `live_replace_notes` or `live_update_effect`. Take track and clip indices from a fresh arrangement read, particularly after adding or removing tracks in LMMS. Changes appear in the open project and can be saved in LMMS.
 
 ## Verification
 

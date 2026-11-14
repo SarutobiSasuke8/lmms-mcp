@@ -17,7 +17,7 @@ const root = path.resolve(process.env.LMMS_WORKSPACE ?? process.cwd());
 const lmms = process.env.LMMS_EXECUTABLE ??
   (process.platform === 'win32' ? 'C:/Program Files/LMMS/lmms.exe' : 'lmms');
 const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(path.dirname(lmms), 'data', 'presets'));
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.3.0' });
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.4.0' });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
@@ -477,7 +477,8 @@ tool('render_stems', 'Render track WAVs with the installed LMMS rendertracks com
 });
 tool('export_midi', 'Export instrument-pattern notes from a static-tempo project as a multitrack MIDI file.', {
   project: projectName, output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
-}, async ({ project, output }) => {
+  pitchMode: z.enum(['written', 'playback']).default('written'),
+}, async ({ project, output, pitchMode }) => {
   const doc = await load(project);
   const [head] = children(doc.documentElement, 'head');
   const bpm = Number(head?.getAttribute('bpm') || 140);
@@ -497,12 +498,16 @@ tool('export_midi', 'Export instrument-pattern notes from a static-tempo project
     const track = midi.addTrack();
     track.name = source.getAttribute('name');
     track.channel = index < 9 ? index : index + 1;
+    const [instrument] = children(source, 'instrumenttrack');
+    const baseNote = Number(instrument?.getAttribute('basenote') || 57);
+    const masterPitch = instrument?.getAttribute('usemasterpitch') === '0' ? 0 : Number(head?.getAttribute('masterpitch') || 0);
+    const transpose = pitchMode === 'playback' ? 57 - baseNote + masterPitch : 0;
     for (const clip of children(source, 'pattern')) {
       if (clip.getAttribute('muted') === '1') continue;
       const offset = Number(clip.getAttribute('pos'));
       for (const note of children(clip, 'note')) {
         const duration = Number(note.getAttribute('len'));
-        const pitch = Number(note.getAttribute('key')) + 12;
+        const pitch = Number(note.getAttribute('key')) + 12 + transpose;
         const position = offset + Number(note.getAttribute('pos'));
         if (!Number.isSafeInteger(duration) || duration <= 0 || !Number.isSafeInteger(position) ||
             position < 0 || !Number.isInteger(pitch) || pitch < 0 || pitch > 127) continue;
@@ -514,14 +519,13 @@ tool('export_midi', 'Export instrument-pattern notes from a static-tempo project
   }
   if (!midi.tracks.some(track => track.notes.length)) throw new Error('No exportable instrument notes');
   await writeFile(path.join(root, output), midi.toArray(), { flag: 'wx' });
-  return { file: output, tracks: midi.tracks.map(track => ({ name: track.name, notes: track.notes.length })) };
+  return { file: output, pitchMode, tracks: midi.tracks.map(track => ({ name: track.name, notes: track.notes.length })) };
 });
 const livePipe = process.env.LMMS_LIVE_PIPE;
 if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe)) {
-  tool('live_transport', 'Control playback in the open LMMS session using a separately installed LMMS Agent Bridge.', {
-    action: z.enum(['play', 'pause', 'stop', 'seek']), position: z.number().int().nonnegative().optional(),
-  }, async args => {
-    if ((args.action === 'seek') !== (args.position !== undefined)) throw new Error('Provide position only for seek');
+  function bridgeCall(command, args = {}) {
+    const request = JSON.stringify({ cmd: command, args }) + '\n';
+    if (Buffer.byteLength(request) > 65536) throw new Error('Live command exceeds the bridge request limit');
     return new Promise((resolve, reject) => {
       const socket = createConnection('\\\\.\\pipe\\' + livePipe);
       let response = '';
@@ -529,10 +533,10 @@ if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe
       socket.setTimeout(5000, () => socket.destroy(new Error('LMMS live bridge timed out')));
       socket.on('error', reject);
       socket.on('end', () => reject(new Error('LMMS live bridge disconnected before it replied')));
-      socket.on('connect', () => socket.write(JSON.stringify({ cmd: 'transport', args }) + '\n'));
+      socket.on('connect', () => socket.write(request));
       socket.on('data', chunk => {
         response += chunk;
-        if (response.length > 65536) return socket.destroy(new Error('LMMS live response is too large'));
+        if (response.length > 16 * 1024 * 1024) return socket.destroy(new Error('LMMS live response is too large'));
         const end = response.indexOf('\n');
         if (end < 0) return;
         socket.destroy();
@@ -545,7 +549,45 @@ if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe
         }
       });
     });
+  }
+  tool('live_transport', 'Control playback in the open LMMS session using a separately installed LMMS Agent Bridge.', {
+    action: z.enum(['play', 'pause', 'stop', 'seek']), position: z.number().int().nonnegative().optional(),
+  }, async args => {
+    if ((args.action === 'seek') !== (args.position !== undefined)) throw new Error('Provide position only for seek');
+    return bridgeCall('transport', args);
   });
+  const index = z.number().int().min(0).max(2147483647);
+  const token = { project_token: z.string().min(1).max(64) };
+  const track = { ...token, track_index: index };
+  const clip = { ...track, clip_index: index };
+  const patternSelector = { ...track, pattern_index: index };
+  tool('live_inspect', 'Inspect the open song, arrangement, or notes. Read the project token and current indices before editing.', {
+    view: z.enum(['project', 'arrangement', 'notes']), track_index: index.optional(), pattern_index: index.optional(),
+  }, async ({ view, ...args }) => {
+    if (view === 'notes' && (args.track_index === undefined || args.pattern_index === undefined)) {
+      throw new Error('Provide track_index and pattern_index to read notes');
+    }
+    if (view !== 'notes' && Object.keys(args).length) throw new Error('Indices only apply to the notes view');
+    return bridgeCall({ project: 'get_project_info', arrangement: 'get_arrangement', notes: 'get_notes' }[view], args);
+  });
+  tool('live_update_track', 'Edit a track in the open song. Changes are unsaved; use the current project token.', {
+    ...track, name: z.string().min(1).max(256).optional(), volume: z.number().min(0).max(200).optional(),
+    panning: z.number().min(-100).max(100).optional(), muted: z.boolean().optional(),
+    solo: z.boolean().optional(), fx_channel: index.optional(),
+  }, async args => bridgeCall('update_track', args));
+  tool('live_update_clip', 'Rename, move or resize a clip in the open song. Changes are unsaved.', {
+    ...clip, name: z.string().min(1).max(256).optional(), new_pos_ticks: index.optional(), length_ticks: index.optional(),
+  }, async args => bridgeCall('update_clip', args));
+  tool('live_replace_notes', 'Replace the notes in an open clip. An empty list clears the clip. Changes are unsaved.', {
+    ...patternSelector, notes: z.array(z.object({
+      key: z.number().int().min(12).max(119), pos: index,
+      length: index.min(1), volume: z.number().int().min(0).max(200).optional(),
+    })).max(512),
+  }, async args => bridgeCall('replace_notes', args));
+  tool('live_update_effect', 'Set the wet mix or bypass state of an existing track or mixer effect in the open song.', {
+    ...token, target_type: z.enum(['track', 'mixer']), target_index: index, effect_index: index,
+    enabled: z.boolean().optional(), wet: z.number().min(-1).max(1).optional(),
+  }, async args => bridgeCall('update_effect', args));
 }
 tool('render_mix', 'Render a 48 kHz loop WAV and report its duration, peak, full-scale samples and loop boundary jump.', {
   project: projectName, output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.wav$/i),

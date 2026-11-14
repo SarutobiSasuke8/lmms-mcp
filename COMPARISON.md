@@ -14,3 +14,11 @@ The live session used LMMS's dummy audio device. Transport state was verified, a
 Run `node verify-exports.mjs` on Windows with LMMS installed to reproduce the saved-project checks. A source MMP path can be supplied. The comparison covers the cases above. Broader mixer and effect coverage, Beat/Bassline and sample clip editing, live editing and comparable export tests against Jx9x remain open.
 
 [ZipseLu source](https://github.com/ZipseLu/lmms-mcp/tree/e57d9fe) · [Jx9x source](https://github.com/Jx9x/lmms-mcp-bridge/tree/5e6f57b)
+
+## Follow-up on exports and live edits
+
+Both servers exported 404 MIDI notes on 6 tracks from Fuse Run Club. Jx9x uses the instrument base-note offset, which moved the AnalogBell part down an octave relative to the written part. Our new playback-pitch option matched all 404 Jx9x pitches. The written-pitch mode remains available. Our 480 PPQ export represents LMMS's 48 ticks per beat exactly. Compared with Jx9x's 128 PPQ export, the largest measured event or duration difference was 0.00521 beats. The Jx9x file omitted the metre event. This comparison did not treat either tool's velocity scaling as a reference.
+
+Both produced 6 non-silent 30-second stereo WAV stems at 48 kHz. Our saved-project export did so in one call. With Jx9x we soloed, rendered, polled and restored each track in a disposable live session. This verifies alignment and duration. The renders use different settings and can differ in level and waveform.
+
+Our adapter changed a live track name and clip name, replaced a clip's notes and bypassed a Delay at 35% wet. Arrangement and note readback confirmed the changes, and a stale project token was rejected. Jx9x still exposes broader native live editing, including creation, automation and Beat/Bassline operations. Its native MIDI export also supports Beat/Bassline parts.
