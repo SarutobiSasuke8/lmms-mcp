@@ -6,6 +6,7 @@
   "files": [
     "server.mjs",
     "fathom.mjs",
+    "vst3-render.py",
     "catalogue.mjs",
     "composers.mjs",
     "audio.mjs",

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -36,6 +36,7 @@ const instructions = [
   'Edit and mix with apply_edits. Render before delivery, inspect levels and the loop seam with analyze_audio, then use export_game_audio for loops, layers and stingers.',
   'Preserve the editable MMP or MMPZ and its referenced samples. A beat is 48 ticks and a 4/4 bar is 192 ticks. Project bars start at zero.',
   'Stock LMMS handles saved projects. Fathom rendering and Windows live control require optional local components.',
+  'Use list_external_tools to discover optional VST3 instruments and related setup instructions.',
 ].join(' ');
 const server = new McpServer({ name: 'lmms-project-tools', version: '0.7.0' }, { instructions });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
@@ -256,6 +257,97 @@ function createSong(bpm, items, mastervol = 86) {
   return doc;
 }
 const profileId = z.enum(Object.keys(composerProfiles));
+const externalInstruments = {
+  'decent-sampler': { env: 'LMMS_DECENT_SAMPLER_VST3', url: 'https://store.decentsamples.com/downloads/decent-sampler/versions', use: 'Sample libraries. Load a library in a VST3 host and save a VST3 preset.' },
+  'surge-xt': { env: 'LMMS_SURGE_XT_VST3', url: 'https://surge-synthesizer.github.io/downloads/', use: 'Synth patches for pads, leads and bass.' },
+};
+const vstWorker = new URL('./vst3-render.py', import.meta.url);
+function externalSetup() {
+  return Object.entries(externalInstruments).map(([id, item]) => ({
+    id, ...item, configured: Boolean(process.env[item.env]), fileFound: Boolean(process.env[item.env] && existsSync(process.env[item.env])),
+  }));
+}
+tool('list_external_tools', 'Discover optional renderer dependencies, VST3 instruments and upstream setup links.', {}, async () => {
+  let dependencies;
+  let workerError;
+  if (process.env.LMMS_VST3_PYTHON) {
+    try {
+      const { stdout } = await run(process.env.LMMS_VST3_PYTHON, [fileURLToPath(vstWorker), 'probe'], { timeout: 5000, windowsHide: true });
+      dependencies = JSON.parse(stdout);
+    } catch (error) {
+      workerError = error.code ?? 'probe failed';
+    }
+  }
+  return { pythonConfigured: Boolean(process.env.LMMS_VST3_PYTHON), dependencies, workerError, instruments: externalSetup(),
+    host: 'https://spotify.github.io/pedalboard/',
+    otherTools: [
+      { name: 'FFmpeg', use: 'OGG export', env: 'LMMS_FFMPEG', url: 'https://ffmpeg.org/download.html' },
+      { name: 'Fathom Synth', use: 'Optional synth worklet', env: 'LMMS_FATHOM_WORKLET' },
+      { name: 'LMMS Agent Bridge', use: 'Optional live editing on Windows', env: 'LMMS_LIVE_PIPE', url: 'https://github.com/Jx9x/lmms-mcp-bridge' },
+      { name: 'FluidSynth', use: 'Standalone SF2/SF3 MIDI render; manual companion workflow', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
+    ],
+    setup: 'See the External VST3 instruments section of the README.' };
+});
+tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments. Return aligned stereo WAVs, a mix and a reproducible assignment manifest.', {
+  midi: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
+  outputDirectory: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i),
+  durationSeconds: z.number().min(0.1).max(120),
+  tracks: z.array(z.object({
+    track: z.string().min(1).max(100),
+    name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
+    instrument: z.enum(Object.keys(externalInstruments)),
+    preset: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.vstpreset$/i).optional(),
+    parameters: z.record(z.string().max(120), z.number().min(0).max(1)).default({}),
+    gainDb: z.number().min(-60).max(12).default(0),
+  })).min(1).max(8),
+}, async ({ midi, outputDirectory, durationSeconds, tracks }) => {
+  const python = process.env.LMMS_VST3_PYTHON;
+  if (!python) throw new Error('Set LMMS_VST3_PYTHON. See list_external_tools and the README.');
+  const names = tracks.map(track => track.name.toLowerCase());
+  if (new Set(names).size !== names.length || names.includes('mix')) throw new Error('Use unique stem names other than mix');
+  const midiPath = path.join(root, midi);
+  const midiInfo = await lstat(midiPath);
+  if (!midiInfo.isFile() || midiInfo.size > 4 * 1024 * 1024) throw new Error('Expected a workspace MIDI file up to 4 MiB');
+  const assignments = [];
+  for (const track of tracks) {
+    const plugin = process.env[externalInstruments[track.instrument].env];
+    if (!plugin || !existsSync(plugin)) throw new Error('Configure ' + externalInstruments[track.instrument].env);
+    const preset = track.preset && path.join(root, track.preset);
+    if (preset) {
+      const info = await lstat(preset);
+      if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error('Expected a workspace VST3 preset up to 16 MiB');
+    }
+    assignments.push({ ...track, plugin, preset });
+  }
+  const directory = path.join(root, outputDirectory);
+  const frames = Math.round(durationSeconds * 48000);
+  await mkdir(directory);
+  const request = path.join(directory, '.render.json');
+  try {
+    await writeFile(request, JSON.stringify({ midi: midiPath, directory, frames, tracks: assignments }), { flag: 'wx' });
+    const { stdout } = await run(python, [fileURLToPath(vstWorker), request], { timeout: 240000, windowsHide: true });
+    const { sharedGain } = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
+    const stems = [];
+    for (const filename of [...tracks.map(track => track.name + '.wav'), 'mix.wav']) {
+      const wav = await readFile(path.join(directory, filename));
+      const stats = measureWav(wav);
+      if (stats.channels !== 2 || stats.sampleRate !== 48000 || Math.round(stats.durationSeconds * 48000) !== frames) {
+        throw new Error('Unexpected VST3 render format or length');
+      }
+      stems.push({ file: filename, ...stats });
+    }
+    await rm(request);
+    const manifest = { midi, sampleRate: 48000, frames, sharedGain, tracks, stems };
+    await writeFile(path.join(directory, 'manifest.json'), JSON.stringify(manifest, null, 2), { flag: 'wx' });
+    return { directory: outputDirectory, ...manifest };
+  } catch (error) {
+    for (const filename of ['.render.json', 'manifest.json', 'mix.wav', ...tracks.map(track => track.name + '.wav')]) {
+      await rm(path.join(directory, filename), { force: true });
+    }
+    await rmdir(directory);
+    throw error;
+  }
+});
 tool('get_started', 'Read the LMMS MCP workflow and discover the local setup before composing, editing or exporting.', {}, async () => ({
   instructions,
   workspace: root,
@@ -263,12 +355,14 @@ tool('get_started', 'Read the LMMS MCP workflow and discover the local setup bef
     lmmsExecutable: lmms,
     fathomConfigured: Boolean(process.env.LMMS_FATHOM_WORKLET && existsSync(process.env.LMMS_FATHOM_WORKLET)),
     liveToolsEnabled: process.platform === 'win32' && /^[a-zA-Z0-9_-]+$/.test(process.env.LMMS_LIVE_PIPE ?? ''),
+    vst3PythonConfigured: Boolean(process.env.LMMS_VST3_PYTHON),
   },
   workflows: {
     plan: ['list_composer_profiles', 'resolve_chords', 'search_sounds', 'list_samples', 'preview_sound'],
     compose: ['create_composer_sketch', 'create_project', 'inspect_arrangement', 'apply_edits'],
     mix: ['inspect_effects', 'list_effects', 'automate_track', 'render_mix', 'analyze_audio'],
     deliver: ['export_game_audio', 'render_stems', 'export_midi', 'export_one_shots'],
+    external: ['list_external_tools', 'render_vst3_stems'],
   },
 }));
 tool('list_composer_profiles', 'Find composer studies by name, musical technique or game use.', {
