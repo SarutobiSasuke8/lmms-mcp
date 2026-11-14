@@ -4,6 +4,10 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+### Added
+
+- `write_melody` and `write_accompaniment`: phrase-based melodies with one recurring idea, a breath after each phrase, a single climax and shaped dynamics, plus a matching backing part.
+
 ## 0.8.0 - 2026-11-14
 
 No breaking changes. Every 0.7.0 tool keeps its name and its required arguments.
