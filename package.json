@@ -1,6 +1,25 @@
 {
   "name": "lmms-mcp",
   "version": "0.7.0",
+  "description": "MCP server that lets an AI agent compose, mix, measure and export game music with stock LMMS 1.2.2",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "lmms",
+    "music",
+    "game-audio",
+    "audio",
+    "midi",
+    "composition"
+  ],
+  "homepage": "https://github.com/SarutobiSasuke8/lmms-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/SarutobiSasuke8/lmms-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SarutobiSasuke8/lmms-mcp.git"
+  },
   "type": "module",
   "license": "MIT",
   "files": [
@@ -13,12 +32,13 @@
     "music.mjs",
     "effects.mjs",
     "tools/",
+    "!tools/*.test.mjs",
     "sound-catalogue.json",
     "skills/",
     "demo.mjs",
     "test.mjs",
-    "verify-exports.mjs",
-    "verify-game-audio.mjs",
+    "verify-*.mjs",
+    "docs/",
     "art/",
     "COMPARISON.md",
     "setup-windows.ps1",
