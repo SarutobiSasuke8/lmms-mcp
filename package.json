@@ -1,11 +1,13 @@
 {
   "name": "lmms-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "license": "MIT",
   "files": [
     "server.mjs",
     "demo.mjs",
+    "art/",
+    "COMPARISON.md",
     "setup-windows.ps1"
   ],
   "engines": {
@@ -19,6 +21,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
+    "@tonejs/midi": "2.0.28",
     "@xmldom/xmldom": "0.9.12",
     "zod": "4.6.7"
   }

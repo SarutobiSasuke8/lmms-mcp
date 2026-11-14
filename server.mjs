@@ -5,17 +5,19 @@ import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { deflateSync, inflateSync } from 'node:zlib';
+import midiPackage from '@tonejs/midi';
+import { createConnection } from 'node:net';
 
 const run = promisify(execFile);
 const root = path.resolve(process.env.LMMS_WORKSPACE ?? process.cwd());
 const lmms = process.env.LMMS_EXECUTABLE ??
   (process.platform === 'win32' ? 'C:/Program Files/LMMS/lmms.exe' : 'lmms');
 const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(path.dirname(lmms), 'data', 'presets'));
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.2.0' });
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.3.0' });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
@@ -45,7 +47,7 @@ function add(parent, tag, attrs = {}) {
   parent.appendChild(node);
   return node;
 }
-const children = (node, tag) => Array.from(node.childNodes).filter(child => child.nodeName === tag);
+const children = (node, tag) => Array.from(node?.childNodes ?? []).filter(child => child.nodeName === tag);
 const xml = new XMLSerializer();
 function parse(source) {
   const doc = new DOMParser().parseFromString(source, 'application/xml');
@@ -322,7 +324,7 @@ tool('set_project_tempo', 'Save a new project copy with a static tempo. Existing
   head.setAttribute('bpm', String(bpm));
   return save(doc, output);
 });
-function measureWav(wav) {
+function readPcm(wav) {
   if (wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') {
     throw new Error('LMMS did not produce a RIFF WAV');
   }
@@ -345,6 +347,10 @@ function measureWav(wav) {
   if (!sampleRate || !frameBytes || !samples?.length || samples.length % frameBytes !== 0) {
     throw new Error('Invalid PCM frame data');
   }
+  return { channels, sampleRate, frameBytes, samples };
+}
+function measureWav(wav) {
+  const { channels, sampleRate, frameBytes, samples } = readPcm(wav);
   let peak = 0;
   let sumSquares = 0;
   let fullScaleSamples = 0;
@@ -363,6 +369,183 @@ function measureWav(wav) {
   return { channels, sampleRate, durationSeconds: samples.length / frameBytes / sampleRate,
     peakDbfs: db(peak), rmsDbfs: db(Math.sqrt(sumSquares / (samples.length / 2))),
     fullScaleSamples, boundaryJumpDbfs: db(boundaryJump) };
+}
+tool('edit_clip', 'Move, duplicate, rename or remove an instrument pattern in a project copy. Positions are absolute LMMS ticks.', {
+  project: projectName, output: projectName, trackName: z.string(),
+  tick: z.number().int().nonnegative(),
+  operation: z.enum(['move', 'duplicate', 'rename', 'remove']),
+  destinationTick: z.number().int().nonnegative().optional(), name: z.string().min(1).max(100).optional(),
+}, async ({ project, output, trackName, tick, operation, destinationTick, name }) => {
+  const doc = await load(project);
+  const target = instrumentOf(doc, trackName).parentNode;
+  const patterns = children(target, 'pattern');
+  const matches = patterns.filter(clip => Number(clip.getAttribute('pos')) === tick);
+  if (matches.length !== 1) throw new Error('Expected one pattern at that tick');
+  const [original] = matches;
+  if (operation === 'remove') target.removeChild(original);
+  if (operation === 'rename') {
+    if (!name) throw new Error('Provide a name');
+    original.setAttribute('name', name);
+  }
+  if (operation === 'move' || operation === 'duplicate') {
+    if (destinationTick === undefined || patterns.some(clip => Number(clip.getAttribute('pos')) === destinationTick)) {
+      throw new Error('Provide an unused destination tick');
+    }
+    const clip = operation === 'duplicate' ? target.appendChild(original.cloneNode(true)) : original;
+    clip.setAttribute('pos', String(destinationTick));
+    if (name) clip.setAttribute('name', name);
+  }
+  return save(doc, output);
+});
+const effectTarget = { project: projectName, trackName: z.string() };
+tool('inspect_effects', 'Read the effect chain of one instrument track.', effectTarget,
+  async ({ project, trackName }) => {
+    const [chain] = children(instrumentOf(await load(project), trackName), 'fxchain');
+    return chain ? children(chain, 'effect').map(effect => ({
+      plugin: effect.getAttribute('name'), enabled: effect.getAttribute('on') !== '0', wet: Number(effect.getAttribute('wet')),
+    })) : [];
+  });
+tool('edit_effect', 'Add a native Delay, EQ or Crossover EQ, or edit and remove existing track effects in a project copy.', {
+  ...effectTarget, output: projectName, operation: z.enum(['add', 'update', 'remove']),
+  plugin: z.enum(['delay', 'eq', 'crossovereq']).optional(), index: z.number().int().nonnegative().optional(),
+  enabled: z.boolean().optional(), wet: z.number().min(0).max(1).optional(),
+}, async ({ project, output, trackName, operation, plugin, index, enabled, wet }) => {
+  const doc = await load(project);
+  const instrument = instrumentOf(doc, trackName);
+  const chain = children(instrument, 'fxchain')[0] ?? add(instrument, 'fxchain', { enabled: 0 });
+  if (operation === 'add' && !plugin) throw new Error('Choose a supported native plugin');
+  const effect = operation === 'add' ? add(chain, 'effect', { name: plugin, on: 1, wet: 1, autoquit: 1, gate: 0 }) :
+    children(chain, 'effect')[index];
+  if (!effect) throw new Error('Provide an existing effect index');
+  if (operation === 'remove') chain.removeChild(effect);
+  else {
+    if (enabled !== undefined) effect.setAttribute('on', enabled ? '1' : '0');
+    if (wet !== undefined) effect.setAttribute('wet', String(wet));
+  }
+  const count = children(chain, 'effect').length;
+  chain.setAttribute('numofeffects', String(count));
+  if (operation === 'add' || !count) chain.setAttribute('enabled', count ? '1' : '0');
+  return save(doc, output);
+});
+tool('render_stems', 'Render track WAVs with the installed LMMS rendertracks command into a new directory.', {
+  project: projectName, outputDirectory: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i),
+}, async ({ project, outputDirectory }) => {
+  await load(project);
+  const output = path.join(root, outputDirectory);
+  await mkdir(output);
+  const temp = await mkdtemp(path.join(root, '.stem-mix-'));
+  try {
+    const mix = path.join(temp, 'mix.wav');
+    const options = { cwd: root, timeout: 180000, windowsHide: true };
+    const args = [path.join(root, project), '-s', '48000', '-f', 'wav', '-l', '-o'];
+    await run(lmms, ['render', ...args, mix], options);
+    const reference = readPcm(await readFile(mix));
+    await run(lmms, ['rendertracks', ...args, output], options);
+    const names = (await readdir(output)).filter(name => name.toLowerCase().endsWith('.wav')).sort();
+    if (!names.length) throw new Error('LMMS returned no stem WAVs');
+    const stems = [];
+    for (const name of names) {
+      const file = path.join(output, name);
+      const original = readPcm(await readFile(file));
+      if (original.channels !== reference.channels || original.sampleRate !== reference.sampleRate) {
+        throw new Error('Stem PCM format differs from the mix');
+      }
+      const dataSize = reference.samples.length;
+      const wav = Buffer.alloc(44 + dataSize);
+      wav.write('RIFF', 0);
+      wav.writeUInt32LE(wav.length - 8, 4);
+      wav.write('WAVEfmt ', 8);
+      wav.writeUInt32LE(16, 16);
+      wav.writeUInt16LE(1, 20);
+      wav.writeUInt16LE(reference.channels, 22);
+      wav.writeUInt32LE(reference.sampleRate, 24);
+      wav.writeUInt32LE(reference.sampleRate * reference.frameBytes, 28);
+      wav.writeUInt16LE(reference.frameBytes, 32);
+      wav.writeUInt16LE(16, 34);
+      wav.write('data', 36);
+      wav.writeUInt32LE(dataSize, 40);
+      original.samples.copy(wav, 44, 0, Math.min(dataSize, original.samples.length));
+      await writeFile(file, wav);
+      stems.push({ file: name, ...measureWav(wav) });
+    }
+    return { directory: outputDirectory, stems };
+  } catch (error) {
+    throw new Error('Stem render failed. Inspect the output directory before retrying: ' + error.message);
+  } finally {
+    await rm(temp, { recursive: true });
+  }
+});
+tool('export_midi', 'Export instrument-pattern notes from a static-tempo project as a multitrack MIDI file.', {
+  project: projectName, output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
+}, async ({ project, output }) => {
+  const doc = await load(project);
+  const [head] = children(doc.documentElement, 'head');
+  const bpm = Number(head?.getAttribute('bpm') || 140);
+  const meter = [Number(head?.getAttribute('timesig_numerator') || 4), Number(head?.getAttribute('timesig_denominator') || 4)];
+  if (children(head, 'bpm').length || !Number.isFinite(bpm) || bpm <= 0 ||
+      !Number.isInteger(meter[0]) || meter[0] < 1 || ![1, 2, 4, 8, 16, 32].includes(meter[1])) {
+    throw new Error('MIDI export requires a valid static tempo and metre');
+  }
+  const midi = new midiPackage.Midi();
+  midi.header.setTempo(bpm);
+  midi.header.timeSignatures.push({ ticks: 0, timeSignature: meter });
+  midi.header.update();
+  const ratio = midi.header.ppq / 48;
+  const sources = tracks(doc).filter(track => track.getAttribute('type') === '0' && children(track, 'pattern').length);
+  if (!sources.length || sources.length > 15) throw new Error('MIDI export supports 1 to 15 instrument tracks');
+  for (const [index, source] of sources.entries()) {
+    const track = midi.addTrack();
+    track.name = source.getAttribute('name');
+    track.channel = index < 9 ? index : index + 1;
+    for (const clip of children(source, 'pattern')) {
+      if (clip.getAttribute('muted') === '1') continue;
+      const offset = Number(clip.getAttribute('pos'));
+      for (const note of children(clip, 'note')) {
+        const duration = Number(note.getAttribute('len'));
+        const pitch = Number(note.getAttribute('key')) + 12;
+        const position = offset + Number(note.getAttribute('pos'));
+        if (!Number.isSafeInteger(duration) || duration <= 0 || !Number.isSafeInteger(position) ||
+            position < 0 || !Number.isInteger(pitch) || pitch < 0 || pitch > 127) continue;
+        const velocity = Number(note.getAttribute('vol') || 100);
+        if (!Number.isFinite(velocity) || velocity <= 0) continue;
+        track.addNote({ midi: pitch, ticks: position * ratio, durationTicks: duration * ratio, velocity: Math.min(1, velocity / 100) });
+      }
+    }
+  }
+  if (!midi.tracks.some(track => track.notes.length)) throw new Error('No exportable instrument notes');
+  await writeFile(path.join(root, output), midi.toArray(), { flag: 'wx' });
+  return { file: output, tracks: midi.tracks.map(track => ({ name: track.name, notes: track.notes.length })) };
+});
+const livePipe = process.env.LMMS_LIVE_PIPE;
+if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe)) {
+  tool('live_transport', 'Control playback in the open LMMS session using a separately installed LMMS Agent Bridge.', {
+    action: z.enum(['play', 'pause', 'stop', 'seek']), position: z.number().int().nonnegative().optional(),
+  }, async args => {
+    if ((args.action === 'seek') !== (args.position !== undefined)) throw new Error('Provide position only for seek');
+    return new Promise((resolve, reject) => {
+      const socket = createConnection('\\\\.\\pipe\\' + livePipe);
+      let response = '';
+      socket.setEncoding('utf8');
+      socket.setTimeout(5000, () => socket.destroy(new Error('LMMS live bridge timed out')));
+      socket.on('error', reject);
+      socket.on('end', () => reject(new Error('LMMS live bridge disconnected before it replied')));
+      socket.on('connect', () => socket.write(JSON.stringify({ cmd: 'transport', args }) + '\n'));
+      socket.on('data', chunk => {
+        response += chunk;
+        if (response.length > 65536) return socket.destroy(new Error('LMMS live response is too large'));
+        const end = response.indexOf('\n');
+        if (end < 0) return;
+        socket.destroy();
+        try {
+          const result = JSON.parse(response.slice(0, end));
+          if (result.ok !== true) throw new Error(result.error ?? result.message ?? 'LMMS rejected transport');
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  });
 }
 tool('render_mix', 'Render a 48 kHz loop WAV and report its duration, peak, full-scale samples and loop boundary jump.', {
   project: projectName, output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.wav$/i),
