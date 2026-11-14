@@ -11,6 +11,7 @@ const converter = fileURLToPath(new URL('../sampler/sfz2dspreset.py', import.met
 
 // A library-relative path that cannot leave the library folder.
 export function resolveInLibrary(library, relative) {
+  relative = relative.replace(/\\/g, '/'); // accept Windows-style separators on every platform
   if (path.isAbsolute(relative) || relative.split(/[\\/]/).includes('..')) throw new Error('Give the .sfz path relative to LMMS_SAMPLE_LIBRARIES, without ..');
   const full = path.resolve(library, relative);
   const inside = path.relative(library, full);
