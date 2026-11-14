@@ -8,6 +8,17 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 - `write_melody` and `write_accompaniment`: phrase-based melodies with one recurring idea, a breath after each phrase, a single climax and shaped dynamics, plus a matching backing part.
 
+## 0.8.1 - 2026-11-14
+
+No tool changes.
+
+### Added
+
+- Published to npm as `@sarutobi-sasuke/lmms-mcp`. Run it with `npx -y @sarutobi-sasuke/lmms-mcp`. Releases are published from CI with provenance when a version tag is pushed.
+
+### Compatibility
+
+- Same as 0.8.0: stock LMMS 1.2.2 and Node.js 22 on Windows x64, with Linux rendering checked in CI. The VST3 and sampler route is tested on Windows x64 only.
 ## 0.8.0 - 2026-11-14
 
 No breaking changes. Every 0.7.0 tool keeps its name and its required arguments.

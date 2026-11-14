@@ -56,7 +56,7 @@ async function runChecks(list, doc, project, strict) {
   return { arrangement };
 }
 const strictChecks = z.boolean().default(false).describe('Stop with an error, writing nothing, when an arrangement check reports an error.');
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.8.0' }, { instructions });
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.8.1' }, { instructions });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
