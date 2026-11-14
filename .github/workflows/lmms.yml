@@ -59,7 +59,7 @@ jobs:
             choco install ffmpeg -y --no-progress
             if ($LASTEXITCODE -ne 0) { throw 'ffmpeg install failed' }
           }
-          & "$env:ChocolateyInstall\bin\ffmpeg.exe" -version | Select-Object -First 1
+          ffmpeg -version | Select-Object -First 1
       - name: Run verify scripts
         shell: bash
         run: |
