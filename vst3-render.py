@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 import wave
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "sampler"))
+
 
 def main():
     if sys.argv[1] == "probe":
@@ -56,7 +58,10 @@ def main():
         plugin = load_plugin(assignment["plugin"])
         if not plugin.is_instrument:
             raise ValueError(f'{assignment["instrument"]} is not a VST3 instrument')
-        if assignment.get("preset"):
+        if assignment.get("dspreset"):
+            from ds_state import load_dspreset
+            load_dspreset(plugin, assignment["dspreset"], "", Path(assignment["dspreset"]).stem)
+        elif assignment.get("preset"):
             plugin.load_preset(assignment["preset"])
         for name, value in assignment["parameters"].items():
             if name not in plugin.parameters:

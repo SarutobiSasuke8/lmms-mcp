@@ -18,8 +18,9 @@ Configure a stdio MCP client with command `node` and the absolute path to `serve
 | `LMMS_FFMPEG` | Path to ffmpeg for OGG output (defaults to `ffmpeg` on the PATH) |
 | `LMMS_RENDER_TIMEOUT_SECONDS` | Fixed render limit; the default scales with song length |
 | `LMMS_PARALLEL_RENDERS` | Renders run side by side for stems and layers (1 to 4, default 3) |
+| `LMMS_SAMPLE_LIBRARIES` | Folder of open SFZ libraries for `convert_sfz` (optional, see [docs/sampler.md](docs/sampler.md)) |
 
-For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.7.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
+For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.8.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
 
 On connection, the server sends a short workflow brief through MCP initialization. Call `get_started` for the same guidance, workflow entry points and local configuration. The MCP tool list documents exact parameters, including optional live tools when configured.
 
@@ -35,6 +36,12 @@ Stem, layer and full-song renders can take a minute or more. Give your MCP clien
 | Listen | `analyze_audio`, `render_mix`, `render_stems` |
 | Deliver | `export_game_audio`, `export_one_shots`, `export_midi`, `save_project_copy` |
 | Read | `inspect_project`, `inspect_arrangement`, `read_pattern` |
+| Start fast | `list_blueprints`, `create_from_blueprint`, `develop_motif` ([docs/blueprints.md](docs/blueprints.md)) |
+| Check | `set_track_role`, `lint_arrangement`, `quality_report` ([docs/arranger-lint.md](docs/arranger-lint.md)) |
+| Balance | `auto_balance`, `compare_to_reference` ([docs/balance.md](docs/balance.md)) |
+| Loops | `find_loop_points`, `prepare_loop` ([docs/loop-prep.md](docs/loop-prep.md)) |
+| Audition | `build_audition_page`, `read_feedback`, `remember_taste`, `get_taste` ([docs/audition.md](docs/audition.md)) |
+| External instruments | `list_external_tools`, `render_vst3_stems`, `convert_sfz` ([docs/sampler.md](docs/sampler.md)) |
 
 A beat has 48 ticks and a 4/4 bar has 192. Bars start at zero. Files use simple names in the workspace, and existing files are protected from overwrites unless a tool says otherwise.
 
@@ -194,6 +201,8 @@ $env:LMMS_SURGE_XT_VST3 = 'C:\path\to\Surge XT.vst3\Contents\x86_64-win\Surge XT
 ```
 
 Download [Decent Sampler](https://store.decentsamples.com/downloads/decent-sampler/versions) and [Surge XT](https://surge-synthesizer.github.io/downloads/) from their publishers. The Windows test used the inner 64-bit VST3 binaries. Open the desired Decent Sampler library in a VST3 host and save its state as a `.vstpreset`. Copy that preset to the workspace and keep the library at the location the preset expects.
+
+To skip the host step, use open SFZ libraries: `setup-libraries-windows.ps1` fetches a piano, upright bass, saxophone and jazz drum kit, `convert_sfz` turns any of them into a `.dspreset`, and `render_vst3_stems` plays it through `decent-sampler` with the `dspreset` option. See [docs/sampler.md](docs/sampler.md).
 
 Export an editable LMMS arrangement with `export_midi`, then pass the MIDI filename, render duration, and named track assignments to `render_vst3_stems`. Assign each stem a configured instrument, an optional workspace `.vstpreset`, normalized parameter overrides and gain in dB. The adapter returns aligned 48 kHz stereo WAVs, a stereo mix and a manifest with the assignments and frame count. Choose a duration that covers the notes and any desired release tail. The output is a fixed-length stem render. For a game loop, set the intended loop length and check the seam before shipping.
 

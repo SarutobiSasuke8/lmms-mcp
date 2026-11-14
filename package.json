@@ -1,6 +1,6 @@
 {
   "name": "lmms-mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "MCP server that lets an AI agent compose, mix, measure and export game music with stock LMMS 1.2.2",
   "keywords": [
     "mcp",
@@ -42,7 +42,11 @@
     "art/",
     "COMPARISON.md",
     "setup-windows.ps1",
-    "setup-vst3-windows.ps1"
+    "setup-vst3-windows.ps1",
+    "setup-libraries-windows.ps1",
+    "CHANGELOG.md",
+    "sampler/",
+    "!sampler/test_*.py"
   ],
   "engines": {
     "node": ">=22"
