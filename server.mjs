@@ -475,7 +475,7 @@ tool('render_stems', 'Render track WAVs with the installed LMMS rendertracks com
     await rm(temp, { recursive: true });
   }
 });
-tool('export_midi', 'Export instrument-pattern notes from a static-tempo project as a multitrack MIDI file.', {
+tool('export_midi', 'Export instrument patterns and arranged Beat/Bassline clips as multitrack MIDI at a static tempo.', {
   project: projectName, output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
   pitchMode: z.enum(['written', 'playback']).default('written'),
 }, async ({ project, output, pitchMode }) => {
@@ -492,7 +492,27 @@ tool('export_midi', 'Export instrument-pattern notes from a static-tempo project
   midi.header.timeSignatures.push({ ticks: 0, timeSignature: meter });
   midi.header.update();
   const ratio = midi.header.ppq / 48;
-  const sources = tracks(doc).filter(track => track.getAttribute('type') === '0' && children(track, 'pattern').length);
+  const songTracks = tracks(doc);
+  const sources = songTracks.filter(track => track.getAttribute('type') === '0' && children(track, 'pattern').length);
+  const beatTracks = songTracks.filter(track => track.getAttribute('type') === '1');
+  const beat = beatTracks.flatMap(track => children(track, 'bbtrack'))[0];
+  const beatLanes = children(children(beat, 'trackcontainer')[0], 'track');
+  const playingBeatLanes = beatLanes.filter(track => track.getAttribute('type') === '0' && track.getAttribute('muted') !== '1');
+  const ticksPerBar = 192 * meter[0] / meter[1];
+  const beatPlacements = beatTracks.map((track, slot) => {
+    const cycle = Math.max(ticksPerBar, ...beatLanes.map(lane =>
+      Number(children(lane, 'pattern')[slot]?.getAttribute('len') || 0)));
+    const clips = track.getAttribute('muted') === '1' ? [] : children(track, 'bbtco')
+      .filter(clip => clip.getAttribute('muted') !== '1')
+      .map(clip => ({ start: Number(clip.getAttribute('pos')), length: Number(clip.getAttribute('len')) }))
+      .filter(({ start, length }) => Number.isSafeInteger(start) && start >= 0 && Number.isSafeInteger(length) && length > 0)
+      .sort((a, b) => a.start - b.start);
+    if (clips.some((clip, i) => i > 0 && clip.start < clips[i - 1].start + clips[i - 1].length)) {
+      throw new Error('MIDI export requires non-overlapping clips within each Beat/Bassline arrangement track');
+    }
+    return { cycle, clips };
+  });
+  if (beatPlacements.some(({ clips }) => clips.length)) sources.push(...playingBeatLanes);
   if (!sources.length || sources.length > 15) throw new Error('MIDI export supports 1 to 15 instrument tracks');
   for (const [index, source] of sources.entries()) {
     const track = midi.addTrack();
@@ -502,18 +522,33 @@ tool('export_midi', 'Export instrument-pattern notes from a static-tempo project
     const baseNote = Number(instrument?.getAttribute('basenote') || 57);
     const masterPitch = instrument?.getAttribute('usemasterpitch') === '0' ? 0 : Number(head?.getAttribute('masterpitch') || 0);
     const transpose = pitchMode === 'playback' ? 57 - baseNote + masterPitch : 0;
-    for (const clip of children(source, 'pattern')) {
-      if (clip.getAttribute('muted') === '1') continue;
-      const offset = Number(clip.getAttribute('pos'));
-      for (const note of children(clip, 'note')) {
-        const duration = Number(note.getAttribute('len'));
+    const isBeat = playingBeatLanes.includes(source);
+    for (const [slot, pattern] of children(source, 'pattern').entries()) {
+      if (pattern.getAttribute('muted') === '1') continue;
+      const placement = isBeat ? beatPlacements[slot] :
+        { cycle: null, clips: [{ start: Number(pattern.getAttribute('pos')), length: Infinity }] };
+      if (!placement) continue;
+      const { cycle, clips } = placement;
+      if (cycle !== null && (!Number.isSafeInteger(cycle) || cycle <= 0)) throw new Error('Invalid Beat/Bassline cycle');
+      for (const note of children(pattern, 'note')) {
+        const rawLength = Number(note.getAttribute('len'));
+        // LMMS stores enabled step triggers with negative length. Give them one step in MIDI.
+        const duration = isBeat && rawLength < 0 ? 12 : rawLength;
         const pitch = Number(note.getAttribute('key')) + 12 + transpose;
-        const position = offset + Number(note.getAttribute('pos'));
-        if (!Number.isSafeInteger(duration) || duration <= 0 || !Number.isSafeInteger(position) ||
-            position < 0 || !Number.isInteger(pitch) || pitch < 0 || pitch > 127) continue;
+        const position = Number(note.getAttribute('pos'));
+        if (!Number.isSafeInteger(duration) || duration <= 0 || !Number.isSafeInteger(position) || position < 0 ||
+            !Number.isInteger(pitch) || pitch < 0 || pitch > 127) continue;
         const velocity = Number(note.getAttribute('vol') || 100);
         if (!Number.isFinite(velocity) || velocity <= 0) continue;
-        track.addNote({ midi: pitch, ticks: position * ratio, durationTicks: duration * ratio, velocity: Math.min(1, velocity / 100) });
+        for (const { start, length } of clips) {
+          const repeats = cycle === null ? 1 : Math.max(0, Math.ceil((length - position) / cycle));
+          if (track.notes.length + repeats > 100000) throw new Error('MIDI track exceeds 100,000 notes');
+          for (let repeat = 0; repeat < repeats; repeat++) {
+            const relative = position + repeat * (cycle ?? 0);
+            track.addNote({ midi: pitch, ticks: (start + relative) * ratio,
+              durationTicks: Math.min(duration, length - relative) * ratio, velocity: Math.min(1, velocity / 100) });
+          }
+        }
       }
     }
   }
@@ -588,6 +623,30 @@ if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe
     ...token, target_type: z.enum(['track', 'mixer']), target_index: index, effect_index: index,
     enabled: z.boolean().optional(), wet: z.number().min(-1).max(1).optional(),
   }, async args => bridgeCall('update_effect', args));
+  tool('live_create_track', 'Create a native song track or an instrument lane in the Beat/Bassline editor.', {
+    ...token, type: z.enum(['instrument', 'sample', 'automation', 'bb']), container: z.enum(['song', 'bb']).optional(),
+    name: z.string().min(1).max(256).optional(), instrument: z.string().min(1).max(120).optional(),
+    volume: z.number().min(0).max(200).optional(),
+  }, async args => bridgeCall('create_track', args));
+  tool('live_load_instrument_file', 'Load a workspace preset or sample into an existing live instrument track.', {
+    ...track, file: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.(xpf|wav|ogg|flac|sf2|gig|xiz)$/i),
+    container: z.enum(['song', 'bb']).optional(),
+  }, async ({ file, ...args }) => {
+    const filename = path.join(root, file);
+    if (!(await lstat(filename)).isFile()) throw new Error('Expected a regular workspace instrument file');
+    return bridgeCall('load_instrument_file', { ...args, path: filename, preserve_name: true });
+  });
+  const points = z.array(z.object({ pos: index, value: z.number().min(-1e9).max(1e9) })).min(1).max(512);
+  const progression = z.enum(['discrete', 'linear', 'cubic']).optional();
+  tool('live_add_automation', 'Create a linked automation clip on an existing automation track.', {
+    ...track, name: z.string().max(256).optional(), pos_ticks: index, length_ticks: index.min(1), points, progression,
+    target_track_index: index, target_parameter: z.enum(['volume', 'panning', 'pitch']),
+  }, async args => bridgeCall('add_automation', args));
+  tool('live_read_automation', 'Read native automation points and linked controls.', clip,
+    async args => bridgeCall('get_automation', args));
+  tool('live_edit_automation', 'Replace or upsert points in an existing native automation clip.', {
+    ...clip, points, mode: z.enum(['replace', 'upsert']).optional(), progression,
+  }, async args => bridgeCall('set_automation_points', args));
 }
 tool('render_mix', 'Render a 48 kHz loop WAV and report its duration, peak, full-scale samples and loop boundary jump.', {
   project: projectName, output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.wav$/i),

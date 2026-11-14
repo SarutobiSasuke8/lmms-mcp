@@ -21,4 +21,8 @@ Both servers exported 404 MIDI notes on 6 tracks from Fuse Run Club. Jx9x uses t
 
 Both produced 6 non-silent 30-second stereo WAV stems at 48 kHz. Our saved-project export did so in one call. With Jx9x we soloed, rendered, polled and restored each track in a disposable live session. This verifies alignment and duration. The renders use different settings and can differ in level and waveform.
 
-Our adapter changed a live track name and clip name, replaced a clip's notes and bypassed a Delay at 35% wet. Arrangement and note readback confirmed the changes, and a stale project token was rejected. Jx9x still exposes broader native live editing, including creation, automation and Beat/Bassline operations. Its native MIDI export also supports Beat/Bassline parts.
+Our adapter changed a live track name and clip name, replaced a clip's notes and bypassed a Delay at 35% wet. Arrangement and note readback confirmed the changes, and a stale project token was rejected.
+
+For Beat/Bassline parity, both servers exported the same pitches and onsets for 16 kick and 16 clap steps in Jx9x's crunk-demo fixture, plus 56 melodic notes. Ours emitted quarter-beat gates for the drum steps. Jx9x's native export produced longer gates on that fixture. Saved-project MIDI currently requires non-overlapping Beat/Bassline clips within each arrangement track.
+
+Both servers created a native automation track, linked a clip to Bass volume and read back linear points at tick 0 / 40% and tick 48 / 72% after an upsert. Our adapter also loaded an AnalogBell preset and a one-shot Ogg into newly created live tracks. Jx9x retains broader native parameter discovery, automation binding and live arrangement controls.
