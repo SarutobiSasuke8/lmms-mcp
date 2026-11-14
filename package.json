@@ -29,6 +29,7 @@
     "server.mjs",
     "fathom.mjs",
     "vst3-render.py",
+    "compose-cli.mjs",
     "catalogue.mjs",
     "composers.mjs",
     "audio.mjs",
@@ -55,7 +56,8 @@
     "node": ">=22"
   },
   "bin": {
-    "lmms-mcp": "server.mjs"
+    "lmms-mcp": "server.mjs",
+    "lmms-compose": "compose-cli.mjs"
   },
   "scripts": {
     "demo": "node demo.mjs",

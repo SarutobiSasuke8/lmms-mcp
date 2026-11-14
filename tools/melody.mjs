@@ -9,8 +9,9 @@ const mod = (a, n) => ((a % n) + n) % n;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 export function rng(seed) {
-  let s = (Number(seed) >>> 0) || 1;
-  const next = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  // Mix the seed first, so neighbouring seeds give unrelated sequences.
+  let s = Math.imul((Number(seed) >>> 0) ^ 0x9e3779b9, 2654435761) >>> 0 || 1;
+  const next = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
   next.pick = list => list[Math.floor(next() * list.length)];
   next.chance = p => next() < p;
   next.spread = n => Math.round((next() * 2 - 1) * n);
@@ -45,7 +46,7 @@ const cells = {
   },
 };
 export const melodyStyles = Object.keys(cells);
-const feels = { lyrical: { layBack: 0, humanize: 2, gate: 0.97 }, driving: { layBack: 0, humanize: 1, gate: 0.86 }, swing: { layBack: 3, humanize: 2, gate: 0.92 } };
+const feels = { lyrical: { layBack: 0, humanize: 1, gate: 0.97 }, driving: { layBack: 0, humanize: 0, gate: 0.86 }, swing: { layBack: 3, humanize: 2, gate: 0.92 } };
 
 // Chords: one entry per bar, looped. "Dm" fills the bar, "F C" splits it evenly.
 export function chordPlan(chords, bars) {
@@ -110,7 +111,7 @@ function sketch({ bars, phraseBars, style, random, start, motif }) {
     const first = p * phraseBars, last = Math.min(bars, first + phraseBars) - 1, length = last - first + 1;
     const lift = Math.round(4 * (1 - Math.abs(p - climax) / span));
     const role = p === phrases - 1 ? 'close' : p === climax && phrases > 2 ? 'develop' : p % 2 === 0 ? 'state' : 'answer';
-    const home = start + lift;
+    const home = start + (role === 'state' || role === 'close' ? 0 : lift); // statements return at their first pitch, so the tune is recognised; the lift shows in their dynamics
     plan.push({ phrase: p, bar: first, bars: length, role, liftDegrees: lift, climax: p === climax });
     const ending = (bar, landing) => place(bar, tail, tail.map((_, i) => landing + (tail.length - 1 - i)), p, i => ({ end: i === tail.length - 1, landing: role }));
     if (length === 1) { ending(first, home); continue; }
@@ -131,9 +132,9 @@ function sketch({ bars, phraseBars, style, random, start, motif }) {
       continue;
     }
     // State or answer: the idea, the idea again one step away with a new ending, then a tail.
-    const varied = p >= 2 && role !== 'close';
+    const varied = role === 'answer' && p >= 2;
     const offset = role === 'answer' ? -1 : 1;
-    place(first, idea, shape.map(d => home + d), p);
+    place(first, idea, shape.map(d => start + d), p); // every phrase opens with the idea at its first pitch, so it is recognised
     for (let bar = first + 1; bar < last; bar++) {
       if ((bar - first) % 2 === 1) { // a contrasting reply: another rhythm that falls back from where the idea ended
         const from = home + shape.at(-1);
