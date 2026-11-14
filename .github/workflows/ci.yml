@@ -50,8 +50,7 @@ jobs:
       - name: Server starts and lists its tools
         run: node .github/scripts/smoke-server.mjs
       - name: Package contents
-        shell: bash
-        run: npm pack --dry-run
+        run: node .github/scripts/check-pack.mjs
 
   schema-diff:
     name: Tool schema changes
