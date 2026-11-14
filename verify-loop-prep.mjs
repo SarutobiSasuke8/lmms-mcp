@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -88,7 +88,10 @@ try {
   assert.ok(prepared.measured.boundaryJumpDbfs === null || prepared.measured.boundaryJumpDbfs < -40, `boundary jump ${prepared.measured.boundaryJumpDbfs}`);
   near(prepared.measured.integratedLufs, -16, 0.5, 'loop loudness');
   assert.equal(prepared.seam.method, 'crossfade');
-  assert.equal(prepared.seam.fadeInto, 'audio before the loop start');
+  assert.equal(prepared.seam.fadeInto, 'audio after the loop end', 'the intro differs from the section end, the second pass matches the first');
+  assert.equal(prepared.seam.fadeShape, 'linear', 'a repeated section is alike on both sides of the fade');
+  assert.equal(prepared.loop.seamless, true, JSON.stringify(prepared.loop.seamIssues));
+  assert.equal(prepared.loop.seamScore, best.seamScore);
   for (const key of ['source', 'detectedBpm', 'bpmConfidence', 'bars']) assert.ok(prepared[key] !== undefined, key);
   assert.equal(prepared.source, 'twice.wav');
   const manifest = JSON.parse(await readFile(path.join(workspace, 'game', 'level-1.manifest.json'), 'utf8'));
@@ -108,6 +111,25 @@ try {
   assert.ok(20 * Math.log10(joinJump || 1e-9) < -30, `intro-to-loop jump ${joinJump}`);
   step(`prepare_loop: ${loopFile.frames} frames, boundary jump ${prepared.measured.boundaryJumpDbfs} dBFS, ${prepared.measured.integratedLufs} LUFS, intro of ${introFile.durationSeconds} s, checksums match${hasFfmpeg ? ', OGG written' : ''}`);
 
+  // 2b. Repeats that are not identical: the second pass of the keys is about 1.5 dB quieter, and the lead has a reverb,
+  // so each pass carries a different tail from what came before it.
+  await call('apply_edits', { project: 'twice.mmp', output: 'uneven.mmp', edits: [
+    { op: 'automate_track', args: { trackName: 'Keys', name: 'First pass', control: 'volume', startTick: 2 * 192, length: 4 * 192, curve: 'step', points: [{ tick: 0, value: 45 }, { tick: 767, value: 45 }] } },
+    { op: 'automate_track', args: { trackName: 'Keys', name: 'Second pass', control: 'volume', startTick: 6 * 192, length: 4 * 192, curve: 'step', points: [{ tick: 0, value: 38 }, { tick: 767, value: 38 }] } },
+    { op: 'edit_effect', args: { trackName: 'Lead', operation: 'add', plugin: 'reverb', wet: 0.4, params: { size: 0.9 } } },
+  ] });
+  await call('render_mix', { project: 'uneven.mmp', output: 'uneven.wav', tail: 'keep' });
+  const uneven = await call('find_loop_points', { audio: 'uneven.wav' });
+  const unevenBest = uneven.candidates[0];
+  console.log('  uneven best', JSON.stringify(unevenBest));
+  assert.equal(unevenBest.bars, 4);
+  near(unevenBest.lengthSeconds, sectionSeconds, 0.003, 'uneven loop length');
+  near(unevenBest.startSeconds, 2 * barSeconds, 0.05, 'uneven loop start');
+  assert.ok(unevenBest.seamScore < best.seamScore, 'inexact repeats score lower than identical ones');
+  const unevenLoop = await call('prepare_loop', { audio: 'uneven.wav', outputDirectory: 'uneven', candidate: 1, targetLufs: -16 });
+  assert.ok(unevenLoop.measured.boundaryJumpDbfs === null || unevenLoop.measured.boundaryJumpDbfs < -40, `uneven boundary jump ${unevenLoop.measured.boundaryJumpDbfs}`);
+  step(`inexact repeats (quieter second pass, reverb tails): ${unevenBest.lengthSeconds} s from ${unevenBest.lengthFrom}, repeat correlation ${unevenBest.repeatCorrelation}, seam score ${unevenBest.seamScore}, fade ${unevenLoop.seam.fadeShape}, boundary jump ${unevenLoop.measured.boundaryJumpDbfs} dBFS`);
+
   // 3. Explicit times and fold: one pass of the section with its ring-out folded onto the start.
   await call('create_project', { output: 'once.mmp', bpm, lengthBars: 4, tracks: [
     { name: 'Keys', voice: 'pad', volume: 45, patterns: [{ name: 'Chords', bar: 0, bars: 4, chords: { progression: 'C G Am F' } }] },
@@ -118,10 +140,18 @@ try {
   assert.equal(folded.seam.method, 'fold');
   near(folded.loop.endFrame / 48000, sectionSeconds, 0.005, 'folded loop length');
   assert.ok(!folded.files.some(f => f.role === 'intro'));
-  assert.equal(folded.bpmSource, 'hint');
+  assert.match(folded.bpmSource, /^hint/);
   console.log('  fold boundary jump', folded.measured.boundaryJumpDbfs);
   assert.ok(folded.measured.boundaryJumpDbfs === null || folded.measured.boundaryJumpDbfs < -30, `fold boundary jump ${folded.measured.boundaryJumpDbfs}`);
   step(`fold seam with explicit times: boundary jump ${folded.measured.boundaryJumpDbfs} dBFS`);
+  // The whole file as the loop leaves nothing to fade with: a plain cut, and the manifest says it is not seamless.
+  const whole = await call('prepare_loop', { audio: 'once.wav', outputDirectory: 'whole', startSeconds: 0, endSeconds: 600 });
+  assert.equal(whole.seam.method, 'cut');
+  assert.equal(whole.loop.seamless, false);
+  assert.ok(whole.loop.seamIssues.some(issue => /plain cut/.test(issue)), JSON.stringify(whole.loop.seamIssues));
+  const wholeManifest = JSON.parse(await readFile(path.join(workspace, 'whole', 'once.manifest.json'), 'utf8'));
+  assert.equal(wholeManifest.loop.seamless, false);
+  step('a plain cut is reported as not seamless, in the result and the manifest');
 
   // 4. Other sample rates and formats through ffmpeg.
   if (hasFfmpeg) {
@@ -137,6 +167,7 @@ try {
     assert.equal(mp3Loop.name, 'twice');
     near(mp3Loop.measured.integratedLufs, -18, 0.5, 'MP3 loop loudness');
     assert.ok(mp3Loop.measured.boundaryJumpDbfs === null || mp3Loop.measured.boundaryJumpDbfs < -40, `MP3 boundary jump ${mp3Loop.measured.boundaryJumpDbfs}`);
+    assert.deepEqual((await readdir(workspace)).filter(name => name.startsWith('.decode-')), [], 'decode folders are removed');
     step(`44.1 kHz WAV and MP3 sources: loop lengths ${at44.candidates[0].lengthSeconds} s and ${fromMp3.candidates[0].lengthSeconds} s, MP3 loop boundary jump ${mp3Loop.measured.boundaryJumpDbfs} dBFS`);
   } else step('ffmpeg not found: skipped the 44.1 kHz and MP3 checks');
 
@@ -148,6 +179,10 @@ try {
   assert.equal(unsure.needsHumanChoice, true);
   await fails('prepare_loop', { audio: 'hiss.wav', outputDirectory: 'hiss-out' }, /person should listen and pick.*Nothing was written/s);
   assert.ok(!existsSync(path.join(workspace, 'hiss-out')));
+  const forced = await call('prepare_loop', { audio: 'hiss.wav', outputDirectory: 'hiss-forced', acceptLowConfidence: true });
+  assert.equal(forced.loop.seamless, false);
+  assert.ok(forced.loop.seamIssues.some(issue => /acceptLowConfidence/.test(issue)), JSON.stringify(forced.loop.seamIssues));
+  await fails('find_loop_points', { audio: 'missing.wav' }, /File not found: missing\.wav/);
   await fails('prepare_loop', { audio: 'twice.wav', outputDirectory: 'game' }, /already exists/);
   await fails('find_loop_points', { audio: '../outside.wav' }, /Invalid|match/i);
   step('low confidence refuses to guess, existing output is kept, paths stay in the workspace');

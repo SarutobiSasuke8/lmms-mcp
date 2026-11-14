@@ -4,22 +4,21 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import * as dsp from '../audio.mjs';
 
 const run = promisify(execFile);
 const round = (value, places = 3) => Number(value.toFixed(places));
-const lowSeamScore = 0.7, lowTempoConfidence = 0.3;
+const lowSeamScore = 0.7, lowTempoConfidence = 0.3, refineCount = 12;
 
 // ---------- decoding ----------
 const ffmpegPath = () => process.env.LMMS_FFMPEG ?? 'ffmpeg';
 export async function ffmpegWorks(ffmpeg = ffmpegPath()) {
-  return run(ffmpeg, ['-version'], { windowsHide: true }).then(() => true, () => false);
+  return run(ffmpeg, ['-version'], { windowsHide: true, timeout: 15000 }).then(() => true, () => false);
 }
-async function ffmpegDecode(file, ffmpeg, downmix) {
-  const temp = await mkdtemp(path.join(tmpdir(), 'lmms-loop-decode-'));
+async function ffmpegDecode(file, ffmpeg, downmix, tempRoot) {
+  const temp = await mkdtemp(path.join(tempRoot, '.decode-'));
   try {
     const out = path.join(temp, 'decoded.wav');
     await run(ffmpeg, ['-v', 'error', '-nostdin', '-i', file, '-vn', ...(downmix ? ['-ac', '2'] : []), '-c:a', 'pcm_f32le', out],
@@ -29,8 +28,10 @@ async function ffmpegDecode(file, ffmpeg, downmix) {
     await rm(temp, { recursive: true, force: true });
   }
 }
-// Decode WAV directly; MP3, OGG, FLAC (and WAV formats audio.mjs cannot read) through ffmpeg. Keeps the source sample rate.
-export async function decodeAudioFile(file, { ffmpeg = ffmpegPath(), available } = {}) {
+// Decode WAV directly; MP3, OGG, FLAC (and WAV formats audio.mjs cannot read) through ffmpeg. Keeps the source sample
+// rate. ffmpeg writes into a dot folder under `tempRoot` (the workspace, from the tools), removed afterwards.
+export async function decodeAudioFile(file, { ffmpeg = ffmpegPath(), available, tempRoot = path.dirname(file) } = {}) {
+  if (!existsSync(file)) throw new Error(`File not found: ${path.basename(file)}`);
   const wav = file.toLowerCase().endsWith('.wav');
   let direct;
   if (wav) {
@@ -41,9 +42,9 @@ export async function decodeAudioFile(file, { ffmpeg = ffmpegPath(), available }
     throw new Error('Reading MP3, OGG and FLAC files needs ffmpeg. Install it or set LMMS_FFMPEG to its path, or convert the file to WAV.');
   }
   try {
-    return { audio: await ffmpegDecode(file, ffmpeg, false), decoder: 'ffmpeg' };
+    return { audio: await ffmpegDecode(file, ffmpeg, false, tempRoot), decoder: 'ffmpeg' };
   } catch (error) {
-    if (/mono or stereo/.test(error.message)) return { audio: await ffmpegDecode(file, ffmpeg, true), decoder: 'ffmpeg (downmixed to stereo)' };
+    if (/mono or stereo/.test(error.message)) return { audio: await ffmpegDecode(file, ffmpeg, true, tempRoot), decoder: 'ffmpeg (downmixed to stereo)' };
     throw new Error('ffmpeg could not decode the file: ' + (error.stderr?.toString().trim() || error.message));
   }
 }
@@ -167,36 +168,60 @@ export function detectTempo(onset, frameRate, { minBpm = 60, maxBpm = 200, bpm: 
     for (let i = 0; i + lag < n; i++) sum += centred[i] * centred[i + lag];
     r[lag] = sum / (n - lag);
   }
-  let period, confidence, source;
-  if (hint) {
-    period = 60 * frameRate / hint; confidence = 1; source = 'hint';
-  } else {
-    const low = Math.max(2, Math.floor(60 * frameRate / maxBpm)), high = Math.min(maxLag, Math.ceil(60 * frameRate / minBpm));
-    if (high <= low || r[0] <= 0) return { bpm: null, confidence: 0, source: 'none', periodFrames: null, firstBeatFrame: 0 };
-    let best = low, bestScore = -Infinity;
-    const range = [];
-    for (let lag = low; lag <= high; lag++) {
-      range.push(r[lag]);
-      const prior = Math.exp(-0.5 * Math.log2(60 * frameRate / lag / 120) ** 2);
-      if (r[lag] * prior > bestScore && r[lag] >= r[lag - 1] && r[lag] >= r[lag + 1]) { bestScore = r[lag] * prior; best = lag; }
-    }
-    range.sort((a, b) => a - b);
-    const median = range[range.length >> 1];
-    confidence = Math.max(0, Math.min(1, (r[best] - median) / (r[0] - median)));
-    period = parabolic(r, best);
-    // Refine against later multiples of the period: their positions pin the period far more precisely.
-    let sxy = period, sxx = 1;
-    for (let k = 2; k * period < maxLag - 2; k++) {
-      const guess = k * sxy / sxx, width = Math.max(2, Math.ceil(guess * 0.01));
-      let peak = Math.round(guess);
-      for (let lag = Math.max(1, Math.round(guess) - width); lag <= Math.min(maxLag, Math.round(guess) + width); lag++) if (r[lag] > r[peak]) peak = lag;
+  const low = Math.max(2, Math.floor(60 * frameRate / maxBpm)), high = Math.min(maxLag, Math.ceil(60 * frameRate / minBpm));
+  if (r[0] <= 0 || (!hint && high <= low)) {
+    if (!hint) return { bpm: null, confidence: 0, source: 'none', periodFrames: null, firstBeatFrame: 0, alternatives: [] };
+    const period = 60 * frameRate / hint;
+    return { bpm: round(hint, 2), confidence: 0, source: 'hint', hintBpm: hint, periodFrames: period, firstBeatFrame: 0, alternatives: [] };
+  }
+  // The strongest autocorrelation peak near a lag (within `width` frames).
+  const peakNear = (lag, width) => {
+    let peak = Math.max(1, Math.round(lag) - width);
+    for (let at = peak; at <= Math.min(maxLag, Math.round(lag) + width); at++) if (r[at] > r[peak]) peak = at;
+    return peak;
+  };
+  // Refine a period against its later multiples: their positions pin the period far more precisely than one peak.
+  const refine = start => {
+    let sxy = start, sxx = 1;
+    for (let k = 2; k * start < maxLag - 2; k++) {
+      const guess = k * sxy / sxx, peak = peakNear(guess, Math.max(2, Math.ceil(guess * 0.01)));
       if (r[peak] <= 0 || peak <= 1 || peak >= maxLag) continue;
       const weight = r[peak] / r[0];
       sxy += k * parabolic(r, peak) * weight; sxx += k * k * weight;
     }
-    period = sxy / sxx;
+    return sxy / sxx;
+  };
+  const range = [];
+  for (let lag = Math.max(2, Math.min(low, high)); lag <= Math.max(low, high); lag++) range.push(r[lag]);
+  range.sort((a, b) => a - b);
+  const median = range[range.length >> 1] ?? 0;
+  const confidenceAt = lag => Math.max(0, Math.min(1, (r[lag] - median) / (r[0] - median)));
+  let period, confidence, source, best;
+  if (hint) {
+    // A hint is a starting point: take the autocorrelation peak within 4% of it, if there is a real one.
+    const guess = 60 * frameRate / hint;
+    best = peakNear(guess, Math.max(2, Math.ceil(guess * 0.04)));
+    if (confidenceAt(best) >= lowTempoConfidence && Math.abs(best - guess) < guess * 0.04) { period = refine(parabolic(r, best)); source = 'hint, refined'; }
+    else { period = guess; source = 'hint'; best = Math.round(guess); }
+    confidence = confidenceAt(Math.round(period));
+  } else {
+    let bestScore = -Infinity;
+    best = low;
+    for (let lag = low; lag <= high; lag++) {
+      const prior = Math.exp(-0.5 * Math.log2(60 * frameRate / lag / 120) ** 2);
+      if (r[lag] * prior > bestScore && r[lag] >= r[lag - 1] && r[lag] >= r[lag + 1]) { bestScore = r[lag] * prior; best = lag; }
+    }
+    confidence = confidenceAt(best);
+    period = refine(parabolic(r, best));
     source = 'detected';
   }
+  // Half and double tempo. Autocorrelation cannot tell a beat from a half-time feel, so say when the other reading is
+  // plausible: a slow reading with strong onsets halfway between beats, or a fast reading whose every other beat is as
+  // strong as the beat itself.
+  const bpm = 60 * frameRate / period, alternatives = [];
+  const half = r[peakNear(period / 2, 2)] / r[best], double = r[peakNear(period * 2, 2)] / r[best];
+  if (bpm < 105 && bpm * 2 <= 260 && half >= 0.5) alternatives.push({ bpm: round(bpm * 2, 2), relation: 'double', strength: round(Math.min(1, half), 2) });
+  if (bpm > 130 && bpm / 2 >= 40 && double >= 0.5) alternatives.push({ bpm: round(bpm / 2, 2), relation: 'half', strength: round(Math.min(1, double), 2) });
   // Beat phase: the offset whose grid collects the most onset energy.
   let firstBeatFrame = 0, phaseScore = -1;
   for (let offset = 0; offset < Math.ceil(period); offset++) {
@@ -204,7 +229,7 @@ export function detectTempo(onset, frameRate, { minBpm = 60, maxBpm = 200, bpm: 
     for (let t = offset; t < n; t += period) sum += novelty[Math.round(t)] ?? 0;
     if (sum > phaseScore) { phaseScore = sum; firstBeatFrame = offset; }
   }
-  return { bpm: round(60 * frameRate / period, 2), confidence: round(confidence, 2), source, periodFrames: period, firstBeatFrame };
+  return { bpm: round(bpm, 2), confidence: round(confidence, 2), source, ...(hint ? { hintBpm: hint } : {}), periodFrames: period, firstBeatFrame, alternatives };
 }
 
 // Bar counts worth trying: every length to 16 bars, then multiples of four.
@@ -232,9 +257,17 @@ function correlation(signal, a, b, length) {
   for (let i = 0; i < length; i++) { const x = signal[a + i], y = signal[b + i]; ab += x * y; aa += x * x; bb += y * y; }
   return aa > 0 && bb > 0 ? ab / Math.sqrt(aa * bb) : 0;
 }
+// First difference: tilts the signal towards transients, so matching locks onto drum hits rather than the phase of a
+// low tone, which can line up equally well a few milliseconds either side.
+export function highPass(signal) {
+  const out = new Float32Array(signal.length);
+  for (let i = 1; i < signal.length; i++) out[i] = signal[i] - signal[i - 1];
+  return out;
+}
 // Find the loop length, near a first guess, at which the audio repeats most exactly. Coarse search on a decimated
-// signal, then sample-accurate at full rate.
-export function refineLength(mono, sampleRate, start, length, { reachSeconds = 0.045 } = {}) {
+// signal, then sample-accurate at full rate. Below `floor` the repeat is too loose to trust the match, so the guess is
+// returned unchanged with `refined: false`.
+export function refineLength(mono, sampleRate, start, length, { reachSeconds = 0.045, floor = 0.5 } = {}) {
   const total = mono.length, reach = Math.ceil(reachSeconds * sampleRate);
   let span = Math.min(length, Math.round(2 * sampleRate));
   let side;
@@ -244,7 +277,7 @@ export function refineLength(mono, sampleRate, start, length, { reachSeconds = 0
     if (span >= sampleRate * 0.25 && start + length + reach <= total) side = 'before';
     else {
       span = Math.min(Math.round(2 * sampleRate), total - start - length - reach);
-      if (span < sampleRate * 0.25) return { length, correlation: null, refined: false };
+      if (span < sampleRate * 0.25) return { length, correlation: null, refined: false, side: null };
       side = 'after';
     }
   }
@@ -266,6 +299,7 @@ export function refineLength(mono, sampleRate, start, length, { reachSeconds = 0
     const c = correlation(mono, a, b + off, fineSpan);
     if (c > bestScore) { bestScore = c; best = off; }
   }
+  if (!(bestScore >= floor)) return { length, correlation: Number.isFinite(bestScore) ? round(bestScore, 4) : null, refined: false, side };
   return { length: length + best, correlation: round(bestScore, 4), refined: true, side };
 }
 
@@ -321,76 +355,100 @@ export function findLoops(audio, { bpm, beatsPerBar = 4, minBars = 1, maxBars = 
   const result = { durationSeconds: round(duration, 4), sampleRate, channels: audio.channels.length,
     tempo: { bpm: tempo.bpm, confidence: tempo.confidence, source: tempo.source, beatsPerBar,
       firstBeatSeconds: tempo.periodFrames ? round(tempo.firstBeatFrame / features.frameRate, 4) : null } };
+  result.tempo.alternatives = tempo.alternatives ?? [];
+  if (tempo.hintBpm) result.tempo.hintBpm = tempo.hintBpm;
   if (!tempo.periodFrames) return { ...result, candidates: [], needsHumanChoice: true, advice: 'No beat was found. Pass bpm, or give prepare_loop explicit startSeconds and endSeconds.' };
-  const beat = tempo.periodFrames / 2, bar = beat * beatsPerBar; // in 20 ms feature frames
-  features.barFeatureFrames = Math.round(bar);
-  const total = features.featureCount, mono = mixMono(audio);
-  const first = tempo.firstBeatFrame / 2;
-  const starts = [];
-  for (let t = first; t < total; t += beat) starts.push(Math.round(t));
-  const window = Math.max(1, Math.round(bar));
+  const total = features.featureCount, mono = mixMono(audio), hop = features.featureHop;
+  // Search the main tempo and any plausible half or double tempo, so bar counts are offered at both readings.
+  const grids = [{ bpm: tempo.bpm, period: tempo.periodFrames, first: tempo.firstBeatFrame },
+    ...result.tempo.alternatives.map(alt => {
+      const period = tempo.periodFrames * tempo.bpm / alt.bpm;
+      return { bpm: alt.bpm, period, first: tempo.firstBeatFrame % period };
+    })];
   const coarse = [];
-  for (const n of barCounts(minBars, maxBars)) {
-    const nominal = n * bar;
-    if (nominal + window * 0.5 > total) break;
-    const spread = Math.ceil(nominal * 0.004) + 1;
-    let best = null;
-    for (let lag = Math.round(nominal) - spread; lag <= Math.round(nominal) + spread; lag++) {
-      if (lag < 1 || lag >= total) continue;
-      const similar = new Float64Array(total - lag + 1);
-      for (let t = 0; t < total - lag; t++) similar[t + 1] = similar[t] + frameSimilarity(features.bands, features.level, t, t + lag);
-      const mean = (from, to) => (similar[to] - similar[from]) / (to - from);
-      let top = -1, choice = null;
-      const scored = [];
-      for (const s of starts) {
-        if (s + lag > total) break;
-        let score;
-        if (s + lag + window <= total) score = mean(s, s + window);
-        else if (s - window >= 0) score = mean(s - window, s);
-        else continue;
-        scored.push([s, score]);
-        if (score > top) top = score;
+  for (const [gridIndex, grid] of grids.entries()) {
+    const beat = grid.period / 2, bar = beat * beatsPerBar; // in 20 ms feature frames
+    const starts = [];
+    for (let t = grid.first / 2; t < total; t += beat) starts.push(Math.round(t));
+    const window = Math.max(1, Math.round(bar));
+    for (const n of barCounts(minBars, maxBars)) {
+      const nominal = n * bar;
+      if (nominal + window * 0.5 > total) break;
+      const spread = Math.ceil(nominal * 0.004) + 1;
+      let best = null;
+      for (let lag = Math.round(nominal) - spread; lag <= Math.round(nominal) + spread; lag++) {
+        if (lag < 1 || lag >= total) continue;
+        const similar = new Float64Array(total - lag + 1);
+        for (let t = 0; t < total - lag; t++) similar[t + 1] = similar[t] + frameSimilarity(features.bands, features.level, t, t + lag);
+        const mean = (from, to) => (similar[to] - similar[from]) / (to - from);
+        let top = -1, choice = null;
+        const scored = [];
+        for (const s of starts) {
+          if (s + lag > total) break;
+          let score;
+          if (s + lag + window <= total) score = mean(s, s + window);
+          else if (s - window >= 0) score = mean(s - window, s);
+          else continue;
+          scored.push([s, score]);
+          if (score > top) top = score;
+        }
+        // Earliest start that is as good as the best, so a repeated section begins where the repetition does.
+        for (const [s, score] of scored) if (score >= top - 0.02) { choice = s; break; }
+        if (choice !== null && (!best || top > best.score)) best = { n, lag, start: choice, score: top, gridIndex, barFrames: Math.round(bar) };
       }
-      // Earliest start that is as good as the best, so a repeated section begins where the repetition does.
-      for (const [s, score] of scored) if (score >= top - 0.02) { choice = s; break; }
-      if (choice !== null && (!best || top > best.score)) best = { n, lag, start: choice, score: top };
+      if (best) coarse.push(best);
     }
-    if (best) coarse.push(best);
   }
-  coarse.sort((a, b) => b.score - a.score);
-  const hop = features.featureHop;
-  const refined = coarse.slice(0, Math.max(6, count + 2)).map(c => {
+  coarse.sort((a, b) => b.score - a.score || a.gridIndex - b.gridIndex);
+  const matchSignal = highPass(mono);
+  const refined = [];
+  // Always refine the same number, whatever `count` is, so ranks agree between find_loop_points and prepare_loop.
+  for (const c of coarse.slice(0, refineCount)) {
+    const grid = grids[c.gridIndex];
     const start = Math.min(audio.frames - 1, Math.round(c.start * hop));
-    const guess = Math.round(c.n * bar * hop);
-    const fit = refineLength(mono, sampleRate, start, Math.min(guess, audio.frames - start));
-    const end = Math.min(audio.frames, start + fit.length);
+    const gridLength = Math.round(c.n * beatsPerBar * grid.period * features.hop);
+    // Start from the lag the search measured; the beat grid is the fallback when the repeat is too loose to match.
+    const fit = refineLength(matchSignal, sampleRate, start, Math.min(Math.round(c.lag * hop), audio.frames - start));
+    const length = fit.refined ? fit.length : Math.min(gridLength, audio.frames - start);
+    const end = Math.min(audio.frames, start + length);
+    if (refined.some(r => Math.abs(r.startFrame - start) < sampleRate * 0.03 && Math.abs(r.endFrame - end) < sampleRate * 0.03)) continue;
+    features.barFeatureFrames = c.barFrames;
     const seam = scoreSeam(audio, features, mono, start, end);
-    return { bars: c.n, startFrame: start, endFrame: end, repeatCorrelation: fit.correlation, ...seam };
-  });
+    refined.push({ bars: c.n, gridIndex: c.gridIndex, startFrame: start, endFrame: end, repeatCorrelation: fit.correlation,
+      lengthFrom: fit.refined ? 'repeat match' : 'beat grid', ...seam });
+  }
+  features.barFeatureFrames = Math.round(tempo.periodFrames / 2 * beatsPerBar);
   // Best seam first; among near ties, the longer loop (less repetition in game).
-  refined.sort((a, b) => Math.abs(a.seamScore - b.seamScore) <= 0.02 ? b.bars - a.bars : b.seamScore - a.seamScore);
-  const beatSeconds = tempo.periodFrames / features.frameRate, firstBeat = tempo.firstBeatFrame / features.frameRate;
+  const seconds = c => (c.endFrame - c.startFrame) / sampleRate;
+  refined.sort((a, b) => Math.abs(a.seamScore - b.seamScore) <= 0.02 ? seconds(b) - seconds(a) || a.gridIndex - b.gridIndex : b.seamScore - a.seamScore);
   const candidates = refined.slice(0, count).map((c, index) => {
+    const grid = grids[c.gridIndex], beatSeconds = grid.period / features.frameRate, firstBeat = grid.first / features.frameRate;
     const start = c.startFrame / sampleRate, end = c.endFrame / sampleRate, length = c.endFrame - c.startFrame;
     return { rank: index + 1, startSeconds: round(start, 4), endSeconds: round(end, 4), lengthSeconds: round(length / sampleRate, 4),
-      startFrame: c.startFrame, endFrame: c.endFrame, lengthFrames: length, bars: c.bars,
+      startFrame: c.startFrame, endFrame: c.endFrame, lengthFrames: length, bars: c.bars, barsAtBpm: grid.bpm,
+      ...(c.gridIndex ? { tempoReading: grid.bpm > tempo.bpm ? 'double' : 'half' } : {}),
       startBar: round((start - firstBeat) / (beatSeconds * beatsPerBar), 2), endBar: round((end - firstBeat) / (beatSeconds * beatsPerBar), 2),
       bpmFromLength: round(c.bars * beatsPerBar * 60 / (length / sampleRate), 2),
-      seamScore: c.seamScore, scores: c.scores, judgedFrom: c.judgedFrom, repeatCorrelation: c.repeatCorrelation,
+      seamScore: c.seamScore, scores: c.scores, judgedFrom: c.judgedFrom, repeatCorrelation: c.repeatCorrelation, lengthFrom: c.lengthFrom,
       intro: start >= 0.1, introSeconds: round(start, 4), afterLoopSeconds: round((audio.frames - c.endFrame) / sampleRate, 4) };
   });
   const reasons = [];
   if (tempo.source === 'detected' && tempo.confidence < lowTempoConfidence) reasons.push(`the beat is unclear (tempo confidence ${tempo.confidence})`);
   if (!candidates.length) reasons.push('no whole-bar loop fits in the file');
   else if (candidates[0].seamScore < lowSeamScore) reasons.push(`the best seam score is only ${candidates[0].seamScore}`);
+  const notes = [];
+  if (candidates[0]?.lengthFrom === 'beat grid') notes.push('The repeats are not close enough to match sample by sample, so the best loop length comes from the beat grid: listen to the seam.');
+  if (result.tempo.alternatives.length) {
+    notes.push(`The tempo may be ${result.tempo.alternatives.map(a => `${a.bpm} bpm (${a.relation})`).join(' or ')} rather than ${tempo.bpm} bpm; candidates are offered at both readings, and bar counts follow barsAtBpm. Loop lengths in seconds do not depend on this.`);
+  }
   // Equally good shorter lengths mean the music repeats more often than the chosen loop.
-  const shortest = coarse.length ? Math.min(...coarse.filter(c => c.score >= coarse[0].score - 0.02).map(c => c.n)) : null;
-  const repeats = candidates.length && shortest < candidates[0].bars
-    ? ` The music also repeats every ${shortest} bars; pass maxBars: ${shortest} for a shorter loop file.` : '';
+  const ties = refined.filter(c => c.seamScore >= (refined[0]?.seamScore ?? 1) - 0.02 && c.gridIndex === refined[0].gridIndex);
+  const shortest = ties.length ? Math.min(...ties.map(c => c.bars)) : null;
+  if (candidates.length && shortest < candidates[0].bars) notes.push(`The music also repeats every ${shortest} bars; pass maxBars: ${shortest} for a shorter loop file.`);
   return { ...result, candidates, needsHumanChoice: reasons.length > 0,
-    advice: (reasons.length
+    advice: [reasons.length
       ? `Confidence is low: ${reasons.join(' and ')}. A person should listen and pick: audition each candidate, then pass its rank as candidate, or explicit startSeconds and endSeconds, to prepare_loop. Passing bpm or a different bar range can help.`
-      : 'The first candidate has the best seam. Pass its rank (or another) to prepare_loop.') + repeats };
+      : 'The first candidate has the best seam. Pass its rank (or another) to prepare_loop.', ...notes].join(' ') };
 }
 
 // ---------- loop building ----------
@@ -399,43 +457,64 @@ export function equalPowerGains(i, n) {
   const angle = Math.PI / 2 * Math.min(1, Math.max(0, i / n));
   return [Math.sin(angle), Math.cos(angle)];
 }
-// Cut [start, end) as a loop with an equal-power crossfade. With audio before the start, the loop's last frames fade
-// into the audio that leads up to the start, so the wrap and the intro-to-loop join are both continuous. Without it,
-// the loop's first frames fade in from the audio that follows the end.
-export function crossfadeLoop(audio, start, end, fadeFrames) {
+// Linear gains at step i of n: [fade in, fade out], with in + out = 1. Right for two signals that are nearly the same,
+// where equal-power gains would add up to 3 dB in the middle of the fade.
+export function linearGains(i, n) {
+  const t = Math.min(1, Math.max(0, i / n));
+  return [t, 1 - t];
+}
+// Above this correlation between the two signals being faded, the fade is linear; below it, equal-power.
+export const linearFadeCorrelation = 0.5;
+// Cut [start, end) as a loop with a crossfade. With audio before the start, the loop's last frames fade into the audio
+// that leads up to the start, so the wrap and the intro-to-loop join are both continuous. Without it, the loop's first
+// frames fade in from the audio that follows the end. The two signals are measured first: a loop found by repetition
+// is nearly the same on both sides of the fade, so a linear fade keeps the level; unrelated audio gets equal power.
+export function crossfadeLoop(audio, start, end, fadeFrames, { shape = 'auto' } = {}) {
   const length = end - start;
-  let fade = Math.min(fadeFrames, length >> 1), mode;
-  if (fade > 0 && start >= fade) mode = 'before';
-  else if (fade > 0 && end + fade <= audio.frames) mode = 'after';
-  else {
-    fade = Math.min(length >> 1, Math.max(start, audio.frames - end));
-    mode = fade > 0 ? (start >= fade ? 'before' : 'after') : 'cut';
-  }
+  let fade = Math.min(fadeFrames, length >> 1);
+  if (!(fade > 0 && (start >= fade || end + fade <= audio.frames))) fade = Math.min(length >> 1, Math.max(start, audio.frames - end));
+  if (fade <= 0) return { audio: dsp.slice(audio, start, end), mode: 'cut', fadeFrames: 0, shape: null, correlation: null };
+  // Frames fading out and frames fading in, as offsets into each channel, for each direction that has the audio.
+  const correlate = (outgoing, incoming) => {
+    let ab = 0, aa = 0, bb = 0;
+    for (const ch of audio.channels) for (let i = 0; i < fade; i++) { const a = ch[outgoing + i], b = ch[incoming + i]; ab += a * b; aa += a * a; bb += b * b; }
+    return aa > 0 && bb > 0 ? ab / Math.sqrt(aa * bb) : 0;
+  };
+  const before = start >= fade ? correlate(end - fade, start - fade) : null;
+  const after = end + fade <= audio.frames ? correlate(end, start) : null;
+  // Fade where the two sides are most alike. Before is preferred on a near tie because it leaves the loop's first
+  // sample, and so the intro-to-loop join, untouched; after the end is better when what precedes the loop (an intro,
+  // say) is different music from what precedes the loop end.
+  const mode = after === null ? 'before' : before === null ? 'after' : before >= after - 0.05 ? 'before' : 'after';
+  const correlation = mode === 'before' ? before : after;
+  const chosen = shape === 'auto' ? (correlation >= linearFadeCorrelation ? 'linear' : 'equal-power') : shape;
+  const gains = chosen === 'linear' ? linearGains : equalPowerGains;
   const channels = audio.channels.map(ch => {
     const out = ch.slice(start, end);
     if (mode === 'before') {
       for (let i = 0; i < fade; i++) {
-        const [fadeIn, fadeOut] = equalPowerGains(i + 1, fade), k = length - fade + i;
+        const [fadeIn, fadeOut] = gains(i + 1, fade), k = length - fade + i;
         out[k] = ch[start + k] * fadeOut + ch[start - fade + i] * fadeIn;
       }
-    } else if (mode === 'after') {
+    } else {
       for (let i = 0; i < fade; i++) {
-        const [fadeIn, fadeOut] = equalPowerGains(i, fade);
+        const [fadeIn, fadeOut] = gains(i, fade);
         out[i] = ch[start + i] * fadeIn + ch[end + i] * fadeOut;
       }
     }
     return out;
   });
-  return { audio: { sampleRate: audio.sampleRate, frames: length, channels }, mode, fadeFrames: mode === 'cut' ? 0 : fade };
+  return { audio: { sampleRate: audio.sampleRate, frames: length, channels }, mode, fadeFrames: fade, shape: chosen, correlation: round(correlation, 3) };
 }
 // Shift a loop region by a few frames, keeping its length, to where the signal is near zero and flat at both ends.
+// Before the first sample is silence, so a region that starts at frame 0 can stay there.
 export function quietestShift(audio, start, end, reach, { minStart = 0, maxEnd = audio.frames } = {}) {
   let best = 0, bestCost = Infinity;
   for (let shift = -reach; shift <= reach; shift++) {
     const s = start + shift, e = end + shift;
-    if (s < Math.max(1, minStart) || e > maxEnd || e >= audio.frames) continue;
+    if (s < Math.max(0, minStart) || e > maxEnd || e >= audio.frames || e < 1) continue;
     let cost = 0;
-    for (const ch of audio.channels) cost += Math.abs(ch[s] - ch[s - 1]) + Math.abs(ch[e] - ch[e - 1]) + 0.5 * (Math.abs(ch[s]) + Math.abs(ch[e]));
+    for (const ch of audio.channels) cost += Math.abs(ch[s] - (s > 0 ? ch[s - 1] : 0)) + Math.abs(ch[e] - ch[e - 1]) + 0.5 * (Math.abs(ch[s]) + Math.abs(ch[e]));
     if (cost < bestCost - 1e-12 || (Math.abs(cost - bestCost) <= 1e-12 && Math.abs(shift) < Math.abs(best))) { bestCost = cost; best = shift; }
   }
   return best;
@@ -451,7 +530,7 @@ export function register({ tool, z, root, schemas, render, moduleGuidance }) {
     beatsPerBar: z.number().int().min(2).max(12).default(4),
     minBars: z.number().int().min(1).max(256).default(1), maxBars: z.number().int().min(1).max(256).default(64),
   };
-  const load = file => decodeAudioFile(path.join(root, file), { available: undefined });
+  const load = file => decodeAudioFile(path.join(root, file), { tempRoot: root });
   moduleGuidance.push('For audio made outside LMMS (for example a song from Suno or another DAW), use find_loop_points to find tempo and loop regions, then prepare_loop to write game-ready loop and intro files with a manifest. They work on any WAV, and on MP3, OGG and FLAC when ffmpeg is installed.');
 
   tool('find_loop_points', 'Read-only. Find the tempo, beat grid and best loop regions of any audio file, including music made outside LMMS. Candidates are whole numbers of bars, scored by how closely the audio after the loop end matches the loop start and by spectrum and waveform on both sides of the seam. Says plainly when a person should pick.', {
@@ -468,7 +547,7 @@ export function register({ tool, z, root, schemas, render, moduleGuidance }) {
     startSeconds: z.number().min(0).optional(), endSeconds: z.number().min(0).optional(),
     ...search,
     intro: z.boolean().default(true).describe('Write the audio before the loop as a separate one-shot intro.'),
-    seam: z.enum(['crossfade', 'fold']).default('crossfade').describe('crossfade: equal-power fade at the seam, placed at a quiet point. fold: add the audio after the loop end onto the loop start, for files that ring out.'),
+    seam: z.enum(['crossfade', 'fold']).default('crossfade').describe('crossfade: fade at the seam, placed at a quiet point; linear when both sides are alike, equal-power when they are not. fold: add the audio after the loop end onto the loop start, for files that ring out.'),
     crossfadeMs: z.number().min(0).max(2000).default(50),
     targetLufs: schemas.loudnessTarget, ceilingDb: schemas.ceilingTarget,
     ogg: z.boolean().default(false).describe('Also write OGG Vorbis files (needs ffmpeg).'),
@@ -485,13 +564,13 @@ export function register({ tool, z, root, schemas, render, moduleGuidance }) {
     const { audio: source } = await load(file);
     const sampleRate = source.sampleRate;
     const notes = [];
-    let start, end, bars, chosen, tempo;
+    let start, end, bars, chosen, tempo, unsure = false;
     if (startSeconds !== undefined) {
       start = Math.round(startSeconds * sampleRate); end = Math.min(source.frames, Math.round(endSeconds * sampleRate));
       if (end - start < sampleRate * 0.25) throw new Error('The loop must be at least 0.25 seconds long and inside the file');
       const features = analyseFrames(source);
       const t = detectTempo(features.onset, features.frameRate, { bpm });
-      tempo = { bpm: t.bpm, confidence: t.confidence, source: t.source };
+      tempo = { bpm: t.bpm, confidence: t.confidence, source: t.source, alternatives: t.alternatives ?? [] };
       if (t.periodFrames) features.barFeatureFrames = Math.round(t.periodFrames / 2 * beatsPerBar);
       chosen = scoreSeam(source, features, mixMono(source), start, end);
       bars = t.bpm ? round((end - start) / sampleRate / (240 / t.bpm * beatsPerBar / 4), 2) : null;
@@ -499,7 +578,7 @@ export function register({ tool, z, root, schemas, render, moduleGuidance }) {
     } else {
       if (minBars > maxBars) throw new Error('minBars must not exceed maxBars');
       const found = findLoops(source, { bpm, beatsPerBar, minBars, maxBars, count: 10 });
-      tempo = { bpm: found.tempo.bpm, confidence: found.tempo.confidence, source: found.tempo.source };
+      tempo = { bpm: found.tempo.bpm, confidence: found.tempo.confidence, source: found.tempo.source, alternatives: found.tempo.alternatives };
       if (!found.candidates.length) throw new Error('No loop candidate was found. ' + found.advice);
       if (candidate === undefined && found.needsHumanChoice && !acceptLowConfidence) {
         const list = found.candidates.slice(0, 5).map(c => `#${c.rank}: ${c.startSeconds}-${c.endSeconds} s, ${c.bars} bars, seam ${c.seamScore}`).join('; ');
@@ -507,22 +586,26 @@ export function register({ tool, z, root, schemas, render, moduleGuidance }) {
       }
       chosen = found.candidates[(candidate ?? 1) - 1];
       if (!chosen) throw new Error(`There are only ${found.candidates.length} candidates`);
-      if (found.needsHumanChoice) notes.push('find_loop_points was not confident about this file: ' + found.advice);
+      if (found.needsHumanChoice) { unsure = true; notes.push('find_loop_points was not confident about this file: ' + found.advice); }
+      if (chosen.lengthFrom === 'beat grid') notes.push('The repeats did not match sample by sample, so the loop length comes from the beat grid.');
       ({ startFrame: start, endFrame: end, bars } = chosen);
     }
+    if (tempo.alternatives.length) notes.push(`The tempo may be ${tempo.alternatives.map(a => `${a.bpm} bpm (${a.relation})`).join(' or ')} rather than ${tempo.bpm} bpm. The loop length in frames does not depend on this, but bar counts do.`);
     const length = end - start;
     // Build the loop.
     let loop, seamInfo, shift = 0;
     if (seam === 'crossfade') {
       const fade = Math.round(crossfadeMs / 1000 * sampleRate);
-      const usesBefore = start >= Math.min(fade, length >> 1) && fade > 0;
-      shift = quietestShift(source, start, end, Math.round(sampleRate * 0.004),
-        usesBefore ? { minStart: Math.min(fade, length >> 1) } : { maxEnd: source.frames - Math.min(fade, length >> 1) });
+      // Keep whichever fade directions the region allows available after the shift.
+      const room = Math.min(fade, length >> 1);
+      shift = quietestShift(source, start, end, Math.round(sampleRate * 0.004), {
+        minStart: start >= room ? room : 0, maxEnd: end + room <= source.frames ? source.frames - room : source.frames });
       start += shift; end += shift;
       const built = crossfadeLoop(source, start, end, fade);
       loop = built.audio;
-      seamInfo = { method: 'crossfade', crossfadeMs: round(built.fadeFrames / sampleRate * 1000, 1), crossfadeFrames: built.fadeFrames,
-        fadeInto: built.mode === 'before' ? 'audio before the loop start' : built.mode === 'after' ? 'audio after the loop end' : 'none' };
+      seamInfo = { method: built.mode === 'cut' ? 'cut' : 'crossfade', crossfadeMs: round(built.fadeFrames / sampleRate * 1000, 1), crossfadeFrames: built.fadeFrames,
+        fadeInto: built.mode === 'before' ? 'audio before the loop start' : built.mode === 'after' ? 'audio after the loop end' : 'none',
+        ...(built.shape ? { fadeShape: built.shape, fadeCorrelation: built.correlation } : {}) };
       if (built.mode === 'cut') notes.push('There is no audio outside the loop to crossfade with, so the seam is a plain cut. Check the boundary jump.');
       else if (built.fadeFrames < fade) notes.push(`The crossfade was shortened to ${seamInfo.crossfadeMs} ms to fit the audio available.`);
     } else {
@@ -567,12 +650,23 @@ export function register({ tool, z, root, schemas, render, moduleGuidance }) {
         mastering?.limiter);
       if (introAudio) await emit(`${name}-intro`, introAudio, 'intro', { next: `${name}-loop.wav` }, introLimit);
       const warnings = dsp.advise(loopReport, { loop: true, targetLufs });
+      // Seamless only when a seam was actually built, it scored well, the samples meet, and nobody overrode a doubt.
+      const jump = loopReport.loop.boundaryJumpDbfs;
+      const seamIssues = [
+        ...(seamInfo.method === 'cut' ? ['the seam is a plain cut'] : []),
+        ...(seamInfo.method === 'fold' && !seamInfo.foldedSeconds ? ['nothing was folded, so the seam is a plain cut'] : []),
+        ...(chosen.seamScore < lowSeamScore ? [`the seam score is ${chosen.seamScore}, under ${lowSeamScore}`] : []),
+        ...(jump !== null && jump > -30 ? [`the first and last samples differ by ${jump} dBFS`] : []),
+        ...(unsure ? ['find_loop_points asked for a person to pick and acceptLowConfidence overrode it'] : []),
+      ];
       const manifest = { name, source: file, sampleRate, channels: loop.channels.length,
         bpm: chosen.bpmFromLength ?? tempo.bpm, detectedBpm: tempo.bpm, bpmConfidence: tempo.confidence, bpmSource: tempo.source,
+        ...(tempo.alternatives.length ? { tempoAlternatives: tempo.alternatives } : {}),
         timeSignature: `${beatsPerBar}/4`, bars,
         gainDb: round(gainDb, 2), ...(targetLufs !== undefined ? { targetLufs } : {}), ...(ceiling !== undefined ? { ceilingDb: ceiling } : {}),
         seam: seamInfo,
-        loop: { file: `${name}-loop.wav`, startFrame: 0, endFrame: loop.frames, seamless: true,
+        loop: { file: `${name}-loop.wav`, startFrame: 0, endFrame: loop.frames, seamless: seamIssues.length === 0, seamScore: chosen.seamScore,
+          ...(seamIssues.length ? { seamIssues } : {}),
           sourceStartFrame: start, sourceEndFrame: end, sourceStartSeconds: round(start / sampleRate, 4), sourceEndSeconds: round(end / sampleRate, 4) },
         ...(introAudio ? { intro: { file: `${name}-intro.wav`, frames: introAudio.frames, then: `${name}-loop.wav` } } : {}),
         files, ...(notes.length ? { notes } : {}) };
