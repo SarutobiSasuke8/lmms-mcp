@@ -41,6 +41,21 @@ const instructions = [
 ].join(' ');
 // Feature modules in tools/ add their own guidance here; get_started returns it.
 const moduleGuidance = [];
+// Arrangement checks that modules register: async (doc, { project }) => null or { summary, blocking, warnings }.
+// Their output is attached as an `arrangement` field. With strict, a blocking result stops the call before anything is written.
+const postSave = [], exportChecks = [];
+async function runChecks(list, doc, project, strict) {
+  const reports = [];
+  for (const check of list) {
+    try { const report = await check(doc, { project }); if (report) reports.push(report); }
+    catch (error) { reports.push({ summary: 'An arrangement check failed: ' + error.message, blocking: false, warnings: [] }); }
+  }
+  if (!reports.length) return {};
+  const arrangement = { summary: reports.map(r => r.summary).join(' '), blocking: reports.some(r => r.blocking), warnings: reports.flatMap(r => r.warnings ?? []) };
+  if (strict && arrangement.blocking) throw new Error(`${arrangement.summary} Nothing was written (strict). ${arrangement.warnings.join(' ')}`);
+  return { arrangement };
+}
+const strictChecks = z.boolean().default(false).describe('Stop with an error, writing nothing, when an arrangement check reports an error.');
 const server = new McpServer({ name: 'lmms-project-tools', version: '0.7.0' }, { instructions });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
@@ -249,13 +264,14 @@ function tool(name, description, inputSchema, handler) {
 }
 // An edit is a change to a loaded project. Each one is a tool of its own and a step for apply_edits.
 const edits = {};
-function edit(name, description, schema, apply) {
+function edit(name, description, schema, apply, { checked = false } = {}) {
   edits[name] = { schema: z.object(schema), apply, description };
-  tool(name, description + ' Writes a new project copy.', { project: projectName, output: projectName, ...schema },
-    async ({ project, output, ...args }) => {
+  tool(name, description + ' Writes a new project copy.', { project: projectName, output: projectName, ...schema, ...(checked ? { strict: strictChecks } : {}) },
+    async ({ project, output, strict, ...args }) => {
       const doc = await load(project);
       const extra = await apply(doc, args);
-      return { ...(await save(doc, output)), ...extra };
+      const checks = checked ? await runChecks(postSave, doc, output, strict) : {};
+      return { ...(await save(doc, output)), ...extra, ...checks };
     });
 }
 function createSong(bpm, items, mastervol = 86) {
@@ -408,7 +424,8 @@ tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 tick
   output: projectName, bpm: z.number().min(45).max(240), tracks: z.array(track).min(1).max(48),
   lengthBars: z.number().int().min(1).max(1000).optional(), masterVolume: volume.default(86),
   tuning: z.enum(['concert', 'preset']).default('concert').describe('How preset voices are tuned; see apply_preset.'),
-}, async ({ output, bpm, tracks: items, lengthBars, masterVolume, tuning }) => {
+  strict: strictChecks,
+}, async ({ output, bpm, tracks: items, lengthBars, masterVolume, tuning, strict }) => {
   if (new Set(items.map(t => t.name)).size !== items.length) throw new Error('Track names must be unique');
   if (items.some(item => item.name === anchorName)) throw new Error(`"${anchorName}" is a reserved track name`);
   for (const item of items) await checkTrack(item);
@@ -421,8 +438,9 @@ tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 tick
   if (wanted < natural) throw new Error(`lengthBars is ${wanted} but the notes run for ${natural} bars`);
   if (wanted > natural) setAnchor(doc, wanted);
   const info = songInfo(doc);
+  const checks = await runChecks(postSave, doc, output, strict);
   return { ...(await save(doc, output)), lengthBars: info.lengthBars, lengthSeconds: Number(info.lengthSeconds.toFixed(4)),
-    lengthPinned: wanted > natural, ...(Object.keys(loaded).length ? { presets: loaded } : {}) };
+    lengthPinned: wanted > natural, ...(Object.keys(loaded).length ? { presets: loaded } : {}), ...checks };
 });
 tool('inspect_project', 'Read saved instrument tracks, pattern locations and note counts.', { project: projectName },
   async ({ project }) => tracks(await load(project)).filter(t => !isAnchor(t)).map(t => ({
@@ -566,7 +584,7 @@ edit('add_track', 'Add an instrument track with its patterns to an existing proj
   const instrument = addTrack(container(doc), item);
   if (anchor) container(doc).appendChild(anchor); // keep the anchor last
   return item.preset ? { preset: await loadPreset(doc, instrument, item.preset, { tuning }) } : undefined;
-});
+}, { checked: true });
 edit('remove_track', 'Remove an instrument track and any automation clips linked to it.', {
   trackName: z.string(),
 }, (doc, { trackName }) => {
@@ -1523,7 +1541,7 @@ edit('set_track_role', 'Declare what an instrument track is for: drums, bass, ha
 // ---------- feature modules ----------
 // Every .mjs file in tools/ exports register(context) and adds its own tools and edits. See tools/README.md.
 const toolContext = {
-  tool, edit, edits, z, dsp, root, imagesKey, explain, moduleGuidance,
+  tool, edit, edits, z, dsp, root, imagesKey, explain, moduleGuidance, postSave, exportChecks,
   schemas: { projectName, wavName, audioOut, workspaceWav, factorySample, folderName, pattern, track, note, volume, presetFile,
     loudnessTarget, ceilingTarget, tailMode, section, pngName },
   project: { load, save, parse, tracks, container, children, elements, add, songInfo, setAnchor, isAnchor, isControl, instrumentOf,
@@ -1538,7 +1556,8 @@ tool('apply_edits', 'Apply many edits to one project and save once. Use this for
   project: projectName, output: projectName,
   overwrite: z.boolean().default(false).describe('Allow replacing an existing output, including the source project itself.'),
   edits: z.array(z.object({ op: z.enum(Object.keys(edits)), args: z.record(z.string(), z.any()).default({}) })).min(1).max(400),
-}, async ({ project, output, overwrite, edits: steps }) => {
+  strict: strictChecks,
+}, async ({ project, output, overwrite, edits: steps, strict }) => {
   const doc = await load(project);
   const results = [];
   for (const [index, { op, args }] of steps.entries()) {
@@ -1548,7 +1567,8 @@ tool('apply_edits', 'Apply many edits to one project and save once. Use this for
       throw new Error(`Edit ${index + 1} of ${steps.length} (${op}) failed: ${explain(error)}. Nothing was written.`);
     }
   }
-  return { ...(await save(doc, output, overwrite)), applied: results.length, results };
+  const checks = await runChecks(postSave, doc, output, strict);
+  return { ...(await save(doc, output, overwrite)), applied: results.length, results, ...checks };
 });
 tool('resolve_chords', 'Turn chord symbols into MIDI notes with smooth voice leading, to check harmony before writing patterns.', {
   progression: z.string().min(1).max(2000), octave: z.number().int().min(0).max(7).default(4),
@@ -1572,8 +1592,10 @@ tool('export_game_audio', 'Export a song for a game engine in one call: a seamle
   stingers: z.array(z.object({ name: folderName, startBar: z.number().int().min(0), bars: z.number().min(0.25).max(16) })).max(16).default([]),
   targetLufs: loudnessTarget, ceilingDb: ceilingTarget,
   ogg: z.boolean().default(false).describe('Also write OGG Vorbis files (needs ffmpeg).'),
-}, async ({ project, outputDirectory, name, introBars, layers, stingers, targetLufs, ceilingDb, ogg }) => {
+  strict: strictChecks,
+}, async ({ project, outputDirectory, name, introBars, layers, stingers, targetLufs, ceilingDb, ogg, strict }) => {
   const doc = await load(project);
+  const checks = await runChecks(exportChecks, doc, project, strict);
   const info = songInfo(doc);
   if (!info.staticTempo) throw new Error('Game export needs a static tempo');
   if (introBars !== undefined && introBars >= info.lengthBars) throw new Error('introBars must be shorter than the song');
@@ -1659,7 +1681,7 @@ tool('export_game_audio', 'Export a song for a game engine in one call: a seamle
       ...(intro ? { intro: { file: `${name}-intro.wav`, frames: intro.frames, then: `${name}-loop.wav` } } : {}),
       ...(residualDb !== undefined ? { layersSumResidualDb: residualDb } : {}), files, ...(notes.length ? { notes } : {}) };
     await writeFile(path.join(destination, `${name}.manifest.json`), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
-    return { directory: outputDirectory, manifest: `${name}.manifest.json`, ...manifest };
+    return { directory: outputDirectory, manifest: `${name}.manifest.json`, ...manifest, ...checks };
   } catch (error) {
     await rm(destination, { recursive: true, force: true }); // created by this call
     throw error;
