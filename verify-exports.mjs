@@ -31,6 +31,31 @@ try {
   }
   const source = await call('inspect_arrangement', { project: 'source.mmp' });
   const trackName = source.tracks[0].name;
+  const inventory = await call('list_instruments', {});
+  if (inventory.nativePlugins.some(plugin => plugin.id === 'lb302')) {
+    await call('set_native_instrument', { project: 'source.mmp', output: 'acid.mmp', trackName, instrument: 'lb302' });
+    const acid = await call('inspect_arrangement', { project: 'acid.mmp' });
+    assert.equal(acid.tracks[0].instrument, 'lb302');
+    assert.deepEqual(
+      await call('read_pattern', { project: 'acid.mmp', trackName, bar: 0 }),
+      await call('read_pattern', { project: 'source.mmp', trackName, bar: 0 }),
+    );
+    const sound = await call('render_mix', { project: 'acid.mmp', output: 'acid.wav' });
+    assert.ok(sound.peakDbfs < 0);
+  }
+  if (process.env.LMMS_FATHOM_WORKLET && process.env.LMMS_FATHOM_TEST_PATCH) {
+    await copyFile(process.env.LMMS_FATHOM_TEST_PATCH, path.join(workspace, 'fathom.json'));
+    const args = { project: 'source.mmp', trackName, patchFile: 'fathom.json', bars: 1 };
+    const dark = await call('render_fathom_track', { ...args, output: 'dark.mmp', audio: 'dark.wav',
+      cutoff: [{ tick: 0, hz: 220 }] });
+    const sweep = await call('render_fathom_track', { ...args, project: dark.project, output: 'sweep.mmp', audio: 'sweep.wav',
+      cutoff: [{ tick: 0, hz: 220 }, { tick: 180, hz: 4800 }] });
+    assert.equal(sweep.notes, dark.notes);
+    assert.equal(sweep.durationSeconds, dark.durationSeconds);
+    assert.ok(!((await readFile(path.join(workspace, dark.audio))).equals(await readFile(path.join(workspace, sweep.audio)))));
+    const rendered = await call('inspect_project', { project: sweep.project });
+    assert.equal(rendered.filter(track => track.name.endsWith(' [Fathom audio]')).length, 1);
+  }
   const clip = { trackName, tick: 0 };
   await call('edit_clip', { project: 'source.mmp', output: 'duplicate.mmp', ...clip, operation: 'duplicate', destinationTick: 3072 });
   await call('edit_clip', { project: 'duplicate.mmp', output: 'moved.mmp', trackName, tick: 3072, operation: 'move', destinationTick: 3264 });

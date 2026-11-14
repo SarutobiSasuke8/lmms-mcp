@@ -11,16 +11,19 @@ import { promisify } from 'node:util';
 import { deflateSync, inflateSync } from 'node:zlib';
 import midiPackage from '@tonejs/midi';
 import { createConnection } from 'node:net';
+import { renderFathom } from './fathom.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(process.env.LMMS_WORKSPACE ?? process.cwd());
 const lmms = process.env.LMMS_EXECUTABLE ??
   (process.platform === 'win32' ? 'C:/Program Files/LMMS/lmms.exe' : 'lmms');
 const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(path.dirname(lmms), 'data', 'presets'));
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.4.0' });
+const pluginDirectory = path.resolve(process.env.LMMS_PLUGINS ?? path.join(path.dirname(lmms), 'plugins'));
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.5.0' });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
+const wavName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.wav$/i);
 const note = z.object({
   tick: z.number().int().min(0), length: z.number().int().min(1),
   midi: z.number().int().min(12).max(119), velocity: z.number().int().min(1).max(100),
@@ -30,7 +33,9 @@ const pattern = z.object({
   bars: z.number().int().min(1).max(64), notes: z.array(note).min(1).max(4096),
 });
 const track = z.object({
-  name: z.string().min(1).max(100), voice: z.enum(['pluck', 'bass', 'pad', 'kick', 'clap', 'hat']),
+  name: z.string().min(1).max(100), voice: z.enum(['pluck', 'bass', 'pad', 'kick', 'clap', 'hat', 'sample']),
+  sample: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.wav$/i).optional(),
+  rootMidi: z.number().int().min(12).max(119).default(69),
   volume: z.number().int().min(0).max(100), pan: z.number().int().min(-100).max(100).default(0),
   patterns: z.array(pattern).min(1).max(64),
 });
@@ -92,7 +97,11 @@ function addPattern(target, part) {
 function addTrack(container, item) {
   const target = add(container, 'track', { muted: 0, solo: 0, type: 0, name: item.name });
   const instrumentTrack = add(target, 'instrumenttrack', { vol: item.volume, pan: item.pan, basenote: 57, fxch: 0 });
-  if (item.voice in kit) {
+  if (item.voice === 'sample') {
+    instrumentTrack.setAttribute('basenote', String(item.rootMidi - 12));
+    add(add(instrumentTrack, 'instrument', { name: 'audiofileprocessor' }), 'audiofileprocessor',
+      { src: path.join(root, item.sample).replaceAll('\\', '/'), amp: 100, sframe: 0, eframe: 1, interp: 1 });
+  } else if (item.voice in kit) {
     add(add(instrumentTrack, 'instrument', { name: 'audiofileprocessor' }), 'audiofileprocessor',
       { src: 'drums/' + kit[item.voice] + '.ogg', amp: 100, sframe: 0, eframe: 1, interp: 1 });
   } else {
@@ -125,6 +134,11 @@ tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 tick
   output: projectName, bpm: z.number().int().min(45).max(240), tracks: z.array(track).min(1).max(24),
 }, async ({ output, bpm, tracks: items }) => {
   if (new Set(items.map(t => t.name)).size !== items.length) throw new Error('Track names must be unique');
+  for (const item of items) {
+    if (item.voice === 'sample' && (!item.sample || !(await lstat(path.join(root, item.sample))).isFile())) {
+      throw new Error('Sample tracks require a regular workspace WAV');
+    }
+  }
   const doc = parse('<?xml version="1.0"?><!DOCTYPE lmms-project><lmms-project version="1.0" creator="LMMS" creatorversion="1.2.2" type="song"/>');
   add(doc.documentElement, 'head', { bpm, mastervol: 86, timesig_numerator: 4, timesig_denominator: 4 });
   const container = add(add(doc.documentElement, 'song'), 'trackcontainer', { type: 'song' });
@@ -150,6 +164,81 @@ tool('read_pattern', 'Read the notes in a saved instrument pattern. Bar numbers 
     })),
   };
 });
+
+tool('render_fathom_track', 'Render LMMS piano-roll notes through Fathom Atelier’s synth worklet with cutoff automation. Save a WAV and an LMMS copy with the rendered audio and editable source notes.', {
+  project: projectName, output: projectName, audio: wavName, trackName: z.string().min(1).max(100),
+  patchFile: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.json$/i),
+  bars: z.number().int().min(1).max(64),
+  cutoff: z.array(z.object({ tick: z.number().int().min(0), hz: z.number().min(28).max(20000) })).min(1).max(256),
+}, async ({ project, output, audio, trackName, patchFile, bars, cutoff }) => {
+  const worklet = process.env.LMMS_FATHOM_WORKLET;
+  if (!worklet) throw new Error('Set LMMS_FATHOM_WORKLET to a trusted local Fathom Atelier synth-processor.js');
+  if (existsSync(path.join(root, output)) || existsSync(path.join(root, audio))) throw new Error('Output already exists');
+  const doc = await load(project);
+  const [head] = children(doc.documentElement, 'head');
+  const bpm = Number(head?.getAttribute('bpm') || 140);
+  if (children(head, 'bpm').length || !Number.isFinite(bpm) || bpm < 45 || bpm > 240 ||
+      Number(head?.getAttribute('timesig_numerator') || 4) !== 4 || Number(head?.getAttribute('timesig_denominator') || 4) !== 4) {
+    throw new Error('Fathom rendering requires static tempo (45–240 BPM) and 4/4 metre');
+  }
+  const durationTicks = bars * 192;
+  if (cutoff[0].tick !== 0 || cutoff.some(({ tick }, index) =>
+    tick > durationTicks || (index > 0 && tick <= cutoff[index - 1].tick))) {
+    throw new Error('Cutoff must start at tick 0 and increase in tick order within the render length');
+  }
+  const secondsPerTick = 60 / bpm / 48;
+  if (durationTicks * secondsPerTick > 120) throw new Error('Fathom rendering supports at most 120 seconds');
+  const songTracks = tracks(doc);
+  const sources = songTracks.filter(t => t.getAttribute('type') === '0' && t.getAttribute('name') === trackName);
+  if (sources.length !== 1) throw new Error('Expected one matching piano-roll track');
+  const [source] = sources;
+  const notes = [];
+  for (const clip of children(source, 'pattern')) {
+    if (clip.getAttribute('muted') === '1') continue;
+    const position = Number(clip.getAttribute('pos'));
+    for (const event of children(clip, 'note')) {
+      const length = Number(event.getAttribute('len'));
+      const velocity = Number(event.getAttribute('vol') || 100);
+      if (length <= 0 || velocity === 0) continue;
+      const data = note.parse({ tick: position + Number(event.getAttribute('pos')), length,
+        midi: Number(event.getAttribute('key')) + 12, velocity });
+      if (data.tick >= durationTicks) continue;
+      notes.push({ ...data, length: Math.min(data.length, durationTicks - data.tick), velocity: data.velocity / 100 });
+    }
+  }
+  if (!notes.length || notes.length > 8192) throw new Error('Expected 1 to 8192 active notes in the render range');
+  const patchPath = path.join(root, patchFile);
+  const info = await lstat(patchPath);
+  if (!info.isFile() || info.size > 65536) throw new Error('Expected a regular Fathom patch JSON file up to 64 KiB');
+  const patch = JSON.parse(await readFile(patchPath, 'utf8'));
+  if (!patch?.filter || typeof patch.filter !== 'object' || !Number.isFinite(patch.volume) ||
+      patch.volume <= 0 || patch.volume > 1 || !['fathom', 'vesper', 'halo'].includes(patch.model)) {
+    throw new Error('Expected a complete Fathom Atelier patch with a nonzero volume up to 1');
+  }
+
+  const name = trackName + ' [Fathom audio]';
+  const previous = songTracks.filter(t => t.getAttribute('name') === name);
+  if (previous.length && (previous.length !== 1 || previous[0].getAttribute('type') !== '2')) {
+    throw new Error('An unrelated track already uses the Fathom audio track name');
+  }
+  const wav = await renderFathom({ worklet, patch, notes, cutoff, secondsPerTick, durationTicks });
+  source.setAttribute('muted', '1');
+  source.setAttribute('solo', '0');
+  previous[0]?.parentNode.removeChild(previous[0]);
+  const target = add(source.parentNode, 'track', { type: 2, name, muted: 0, solo: 0 });
+  add(target, 'sampletco', { pos: 0, len: durationTicks, muted: 0,
+    src: path.join(root, audio).replaceAll('\\', '/') });
+  const filename = path.join(root, audio);
+  await writeFile(filename, wav, { flag: 'wx' });
+  try {
+    await save(doc, output);
+  } catch (error) {
+    await rm(filename);
+    throw error;
+  }
+  return { project: output, audio, track: name, notes: notes.length, cutoff, ...measureWav(wav) };
+});
+
 function findPattern(doc, trackName, bar) {
   const matching = tracks(doc).filter(t => t.getAttribute('name') === trackName && t.getAttribute('type') === '0');
   if (matching.length !== 1) throw new Error('Expected one matching instrument track');
@@ -190,13 +279,44 @@ tool('set_track_mix', 'Save a project copy with volume, pan, mute or solo change
   return save(doc, output);
 });
 const presetFile = z.string().regex(/^[\w -]+\/[\w .()-]+\.xpf$/i);
-tool('list_presets', 'List installed XML factory preset paths.', {}, async () => {
+async function listPresets() {
   const groups = await readdir(presets, { withFileTypes: true });
   const files = await Promise.all(groups.filter(group => group.isDirectory()).map(async group => {
     const entries = await readdir(path.join(presets, group.name), { withFileTypes: true });
     return entries.filter(entry => entry.isFile()).map(entry => group.name + '/' + entry.name);
   }));
   return files.flat().filter(name => presetFile.safeParse(name).success).sort();
+}
+tool('list_presets', 'List installed XML factory preset paths.', {}, listPresets);
+
+// Instrument plugin IDs used by the stock LMMS 1.2 series.
+const instruments = {
+  audiofileprocessor: 'Sample playback', bitinvader: 'Wavetable synthesis', carlarack: 'External plugin host',
+  carlapatchbay: 'External plugin host', gigplayer: 'GIG sampler', kicker: 'Kick drum synthesis',
+  lb302: 'Acid bass synthesis', malletsstk: 'Physical modelling', monstro: 'Subtractive and modulation synthesis',
+  nes: 'NES-style synthesis', opl2: 'FM synthesis', organic: 'Additive synthesis', papu: 'Game Boy-style synthesis',
+  patman: 'GUS patch sampler', sf2player: 'SoundFont player', sfxr: 'Retro game sound effects',
+  sid: 'SID-style synthesis', tripleoscillator: 'Three-oscillator subtractive synthesis', vestige: 'VST instrument host',
+  vibedstrings: 'Plucked string modelling', watsyn: 'Wavetable synthesis', zynaddsubfx: 'Additive and subtractive synthesis',
+};
+async function installedInstrumentIds() {
+  const entries = await readdir(pluginDirectory, { withFileTypes: true });
+  const modules = new Set(entries.filter(entry => /\.(dll|so|dylib)$/i.test(entry.name))
+    .map(entry => entry.name.toLowerCase().replace(/\.(dll|so|dylib)$/, '')));
+  return Object.keys(instruments).filter(id => modules.has(id) || modules.has('lib' + id));
+}
+tool('list_instruments', 'Discover known stock instrument plugins found on disk, factory presets and Fathom bridge configuration.', {}, async () => {
+  const [plugins, factoryPresets] = await Promise.allSettled([installedInstrumentIds(), listPresets()]);
+  const worklet = process.env.LMMS_FATHOM_WORKLET;
+  return {
+    builtInVoices: [...Object.keys(tones), ...Object.keys(kit), 'sample'],
+    nativePlugins: (plugins.value ?? []).map(id => ({ id, family: instruments[id] })),
+    pluginScan: plugins.status === 'fulfilled' ? pluginDirectory : { directory: pluginDirectory, error: plugins.reason.code },
+    factoryPresets: factoryPresets.value ?? [],
+    presetScan: factoryPresets.status === 'fulfilled' ? presets : { directory: presets, error: factoryPresets.reason.code },
+    fathom: { configured: Boolean(worklet), workletFound: Boolean(worklet && existsSync(worklet)),
+      models: ['fathom', 'vesper', 'halo'], tool: 'render_fathom_track' },
+  };
 });
 function instrumentOf(doc, name) {
   const matching = tracks(doc).filter(track => track.getAttribute('name') === name && track.getAttribute('type') === '0');
@@ -204,6 +324,20 @@ function instrumentOf(doc, name) {
   if (!instrument) throw new Error('Expected one instrument track named ' + name);
   return instrument;
 }
+tool('set_native_instrument', 'Load an installed stock LMMS instrument at its default settings. Keep existing notes, mixer routing and track controls.', {
+  project: projectName, output: projectName, trackName: z.string(), instrument: z.enum(Object.keys(instruments)),
+}, async ({ project, output, trackName, instrument }) => {
+  if (!(await installedInstrumentIds()).includes(instrument)) throw new Error('Instrument plugin was not found in LMMS_PLUGINS');
+  const doc = await load(project);
+  const target = instrumentOf(doc, trackName);
+  const [previous] = children(target, 'instrument');
+  if (previous && Array.from(previous.getElementsByTagName('*')).some(node => node.hasAttribute('id'))) {
+    throw new Error('Existing instrument has linked controls');
+  }
+  if (previous) target.removeChild(previous);
+  add(add(target, 'instrument', { name: instrument }), instrument);
+  return save(doc, output);
+});
 tool('apply_preset', 'Load an installed XML preset sound into a track in a new project copy.', {
   project: projectName, output: projectName, trackName: z.string(), preset: presetFile,
 }, async ({ project, output, trackName, preset }) => {
@@ -370,6 +504,79 @@ function measureWav(wav) {
     peakDbfs: db(peak), rmsDbfs: db(Math.sqrt(sumSquares / (samples.length / 2))),
     fullScaleSamples, boundaryJumpDbfs: db(boundaryJump) };
 }
+const soundName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i);
+tool('export_one_shots', 'Trim edge silence, fade and peak-match source WAVs as mono 48 kHz game sound effects.', {
+  outputDirectory: soundName,
+  sounds: z.array(z.object({
+    input: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.wav$/i), name: soundName,
+  })).min(1).max(32),
+  thresholdDb: z.number().min(-75).max(-20).default(-48),
+  peakDb: z.number().min(-18).max(-1).default(-3),
+}, async ({ outputDirectory, sounds, thresholdDb, peakDb }) => {
+  if (new Set(sounds.map(s => s.name.toLowerCase())).size !== sounds.length) throw new Error('Sound names must be unique');
+  const destination = path.join(root, outputDirectory);
+  await mkdir(destination);
+  try {
+    const files = [];
+    for (const { input, name } of sounds) {
+      const source = path.join(root, input);
+      const info = await lstat(source);
+      if (!info.isFile() || info.size > 32 * 1024 * 1024) throw new Error('Expected a regular workspace WAV up to 32 MiB');
+      const { samples, channels, sampleRate, frameBytes } = readPcm(await readFile(source));
+      if (sampleRate !== 48000 || channels > 2) throw new Error('Source WAVs must be 48 kHz mono or stereo 16-bit PCM');
+      const frames = samples.length / frameBytes;
+      if (frames > sampleRate * 30) throw new Error('Source one-shots must be 30 seconds or shorter');
+      const mono = new Float64Array(frames);
+      const cutoff = 32768 * 10 ** (thresholdDb / 20);
+      let start = frames;
+      let end = 0;
+      for (let i = 0; i < frames; i++) {
+        mono[i] = samples.readInt16LE(i * frameBytes);
+        if (channels === 2) mono[i] = (mono[i] + samples.readInt16LE(i * frameBytes + 2)) / 2;
+        if (Math.abs(mono[i]) >= cutoff) {
+          start = Math.min(start, i);
+          end = i + 1;
+        }
+      }
+      if (!end) throw new Error(input + ' is silent at the trim threshold');
+      start = Math.max(0, start - 240);
+      end = Math.min(frames, end + 480);
+      const take = mono.subarray(start, end);
+      const fade = Math.max(1, Math.min(240, Math.floor(take.length / 4)));
+      let peak = 0;
+      for (let i = 0; i < take.length; i++) {
+        take[i] *= Math.min(1, i / fade, (take.length - 1 - i) / fade);
+        peak = Math.max(peak, Math.abs(take[i]));
+      }
+      if (!peak) throw new Error(input + ' has no signal after fades');
+      const gain = 32767 * 10 ** (peakDb / 20) / peak;
+      const wav = Buffer.alloc(44 + take.length * 2);
+      wav.write('RIFF', 0);
+      wav.writeUInt32LE(wav.length - 8, 4);
+      wav.write('WAVEfmt ', 8);
+      wav.writeUInt32LE(16, 16);
+      wav.writeUInt16LE(1, 20);
+      wav.writeUInt16LE(1, 22);
+      wav.writeUInt32LE(sampleRate, 24);
+      wav.writeUInt32LE(sampleRate * 2, 28);
+      wav.writeUInt16LE(2, 32);
+      wav.writeUInt16LE(16, 34);
+      wav.write('data', 36);
+      wav.writeUInt32LE(take.length * 2, 40);
+      for (let i = 0; i < take.length; i++) wav.writeInt16LE(Math.round(take[i] * gain), 44 + i * 2);
+      const file = name + '.wav';
+      await writeFile(path.join(destination, file), wav, { flag: 'wx' });
+      files.push({ file, source: input, trimStartSeconds: start / sampleRate, ...measureWav(wav) });
+    }
+    const manifest = { sampleRate: 48000, channels: 1, peakTargetDbfs: peakDb, files };
+    await writeFile(path.join(destination, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+    return manifest;
+  } catch (error) {
+    // The directory was created exclusively by this call.
+    await rm(destination, { recursive: true });
+    throw error;
+  }
+});
 tool('edit_clip', 'Move, duplicate, rename or remove an instrument pattern in a project copy. Positions are absolute LMMS ticks.', {
   project: projectName, output: projectName, trackName: z.string(),
   tick: z.number().int().nonnegative(),
@@ -649,7 +856,7 @@ if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe
   }, async args => bridgeCall('set_automation_points', args));
 }
 tool('render_mix', 'Render a 48 kHz loop WAV and report its duration, peak, full-scale samples and loop boundary jump.', {
-  project: projectName, output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.wav$/i),
+  project: projectName, output: wavName,
 }, async ({ project, output }) => {
   if (existsSync(path.join(root, output))) throw new Error('Output already exists');
   const temp = await mkdtemp(path.join(root, '.render-'));

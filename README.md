@@ -10,7 +10,7 @@ Install Node.js 22 or newer. From a checkout run `./setup-windows.ps1`. It insta
 
 Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. Set `LMMS_EXECUTABLE` for a custom executable path and `LMMS_PRESETS` for a custom preset directory. The tested combination is Node.js 22 and LMMS 1.2.2 on Windows x64.
 
-For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.4.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately.
+For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.5.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. LMMS still needs to be installed separately.
 
 | Tool | Purpose |
 | --- | --- |
@@ -25,6 +25,9 @@ For an install that follows a fixed GitHub release, run `npx -y https://github.c
 | `set_project_tempo` | Set static BPM in a new project copy |
 | `set_track_mix` | Edit instrument volume, pan, mute or solo |
 | `list_presets` / `apply_preset` | Browse installed XML presets and apply compatible instruments and envelopes |
+| `list_instruments` | Discover known stock instrument plugins on disk, usable preset paths and Fathom bridge setup |
+| `set_native_instrument` | Swap in a discovered stock instrument while keeping the notes and track controls |
+| `render_fathom_track` | Render editable piano-roll notes through Fathom Atelier with a programmable filter sweep |
 | `route_mixer_bus` | Add a named bus routed to master and assign instrument tracks |
 | `automate_track` | Write a track volume or low-pass cutoff envelope |
 | `render_mix` | Render a 48 kHz stereo loop and report duration, peak, RMS, full-scale samples and boundary jump |
@@ -32,6 +35,54 @@ For an install that follows a fixed GitHub release, run `npx -y https://github.c
 | `export_midi` | Export named instrument tracks with pitches, timing and velocity |
 
 ## Export and playback
+
+Use `export_one_shots` to process up to 32 mono or stereo 48 kHz, 16-bit PCM WAVs in one call. Give each source a unique output name and choose a new output directory. The tool trims quiet edges, adds short fades, matches sample peaks and writes mono WAVs and a JSON manifest. The manifest reports duration, trim offset and measured levels. Peak matching leaves each take's dynamics intact.
+
+```json
+{
+  "outputDirectory": "rts-pack",
+  "sounds": [
+    {"input": "ack-source.wav", "name": "unit-acknowledged"},
+    {"input": "shutdown-source.wav", "name": "robot-shutdown"}
+  ],
+  "thresholdDb": -48,
+  "peakDb": -3
+}
+```
+
+For a saved sampler track, use `create_project` with `voice: "sample"`, a workspace WAV as `sample` and the recorded pitch as `rootMidi`. Trigger the sample at the root for unchanged pitch or use other notes to transpose it. The saved project references that WAV by its absolute path. Use LMMS to relink the source if you move the project to a different machine.
+
+## Fathom Atelier
+
+Set `LMMS_FATHOM_WORKLET` to the absolute path of a trusted Fathom Atelier checkout's `public/worklets/synth-processor.js` before launching the MCP. The LMMS MCP package ships the adapter. The synth engine is supplied locally. Use `list_instruments` to check configuration and discover the stock plugin and preset inventory. Set `LMMS_PLUGINS` if your installation stores plugins outside the executable's adjacent `plugins` directory. The inventory checks files on disk. Third-party plugins loaded inside hosts such as Carla or VeSTige need their own inventory.
+
+Save a full Fathom patch object as JSON in the workspace. Supported model IDs are `fathom`, `vesper` and `halo`. Call `render_fathom_track` with a saved 4/4 project at a static tempo.
+
+```json
+{
+  "project": "ninja-bomber-source.mmp",
+  "output": "ninja-bomber-fathom.mmp",
+  "audio": "fathom-arp-stem.wav",
+  "trackName": "Fathom Spark Arp",
+  "patchFile": "spark-dark.json",
+  "bars": 8,
+  "cutoff": [
+    {"tick": 0, "hz": 220},
+    {"tick": 576, "hz": 375},
+    {"tick": 1152, "hz": 1300},
+    {"tick": 1470, "hz": 4850}
+  ]
+}
+```
+
+The bridge uses the written pitches, note lengths and velocities. It interpolates cutoff by frequency ratio and updates the worklet every 128 samples. The project copy keeps the muted source piano-roll track for editing and MIDI export and plays the rendered audio from a sample track. Rerun after editing notes, tempo, patch or cutoff, with fresh output filenames. The current bridge renders the dry worklet. Apply delay, chorus and reverb in LMMS as needed. The audio clip references an absolute WAV path, so relink it when moving the project.
+
+## Roadmap
+
+- Add a searchable sound catalogue with timbre, role and genre tags, short previews and exact patch or instrument selectors.
+- Expose bounded, instrument-specific parameters and expand automation beyond cutoff. Save render settings alongside arrangements so edits can be rebounced without reconstructing the render call.
+- Add adaptive game exports with aligned intensity layers, intros, stingers and one-shot manifests.
+- Expand the sound palette with instrument packs first, including sampled guitars, designed drums and voice one-shots. Consider new engines for playing behaviours the packs cannot capture, such as expressive sustained strings.
 
 Keep the native project as the editable master. MIDI exports instrument patterns and non-overlapping Beat/Bassline clips at a static tempo. Drum steps export as sixteenth-note triggers. Synth patches, effects, audio clips and automation stay in the native project. The default `pitchMode: "written"` preserves the piano-roll notes. Select `"playback"` to apply the instrument base note and master pitch offsets. Plugin transposition and pitch modulation remain in the native project.
 
@@ -48,6 +99,8 @@ For your own synth patches, place a compatible LMMS `.xpf` in the workspace and 
 ## Verification
 
 Run `npm ci` and `node verify-exports.mjs` from source on Windows with LMMS 1.2.2 installed. Pass a native MMP path to exercise a different project with instrument patterns at the start of the arrangement. The script checks clip edits, MIDI readback, effect bypass and stem duration through a real stdio connection.
+
+Set `LMMS_FATHOM_WORKLET` and `LMMS_FATHOM_TEST_PATCH` to the local worklet and a full patch JSON to also verify Fathom cutoff rendering and rebouncing.
 
 See [the comparison notes](COMPARISON.md) for tested workflows and gaps.
 
