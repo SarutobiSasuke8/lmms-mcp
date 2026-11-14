@@ -6,6 +6,8 @@
   "files": [
     "server.mjs",
     "fathom.mjs",
+    "catalogue.mjs",
+    "skills/",
     "demo.mjs",
     "art/",
     "COMPARISON.md",

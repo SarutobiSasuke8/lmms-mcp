@@ -32,6 +32,30 @@ try {
   const source = await call('inspect_arrangement', { project: 'source.mmp' });
   const trackName = source.tracks[0].name;
   const inventory = await call('list_instruments', {});
+  const darkArps = await call('search_sounds', { query: 'dark arp', engine: 'fathom' });
+  assert.equal(darkArps.sounds[0].patchId, 'fuse-pluck');
+  assert.equal((await call('search_sounds', { query: 'no matching patch' })).total, 0);
+  const nativeSounds = await call('search_sounds', { query: 'analogbell', engine: 'lmms' });
+  if (nativeSounds.sounds.length) {
+    const preview = await call('preview_sound', { preset: nativeSounds.sounds[0].preset, output: 'native-preview.wav' });
+    assert.equal(preview.durationSeconds, 2);
+    assert.ok(Number.isFinite(preview.peakDbfs));
+    console.log(preview);
+  }
+  if (process.env.LMMS_FATHOM_WORKLET) {
+    const catalogue = await call('search_sounds', { engine: 'fathom' });
+    for (const { patchId } of catalogue.sounds) {
+      const preview = await call('preview_sound', { patchId, output: patchId + '.wav' });
+      assert.equal(preview.durationSeconds, 2);
+      assert.ok(Number.isFinite(preview.peakDbfs) && preview.peakDbfs < 0);
+      console.log(preview);
+    }
+    const catalogueRender = await call('render_fathom_track', {
+      project: 'source.mmp', trackName, patchId: darkArps.sounds[0].patchId, bars: 1,
+      cutoff: [{ tick: 0, hz: 340 }, { tick: 180, hz: 4200 }], output: 'catalogue.mmp', audio: 'catalogue.wav',
+    });
+    assert.ok(catalogueRender.notes > 0);
+  }
   if (inventory.nativePlugins.some(plugin => plugin.id === 'lb302')) {
     await call('set_native_instrument', { project: 'source.mmp', output: 'acid.mmp', trackName, instrument: 'lb302' });
     const acid = await call('inspect_arrangement', { project: 'acid.mmp' });

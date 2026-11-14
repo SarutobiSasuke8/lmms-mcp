@@ -26,6 +26,7 @@ For an install that follows a fixed GitHub release, run `npx -y https://github.c
 | `set_track_mix` | Edit instrument volume, pan, mute or solo |
 | `list_presets` / `apply_preset` | Browse installed XML presets and apply compatible instruments and envelopes |
 | `list_instruments` | Discover known stock instrument plugins on disk, usable preset paths and Fathom bridge setup |
+| `search_sounds` / `preview_sound` | Find stock presets and Fathom patches, then audition them as short WAVs |
 | `set_native_instrument` | Swap in a discovered stock instrument while keeping the notes and track controls |
 | `render_fathom_track` | Render editable piano-roll notes through Fathom Atelier with a programmable filter sweep |
 | `route_mixer_bus` | Add a named bus routed to master and assign instrument tracks |
@@ -77,9 +78,15 @@ Save a full Fathom patch object as JSON in the workspace. Supported model IDs ar
 
 The bridge uses the written pitches, note lengths and velocities. It interpolates cutoff by frequency ratio and updates the worklet every 128 samples. The project copy keeps the muted source piano-roll track for editing and MIDI export and plays the rendered audio from a sample track. Rerun after editing notes, tempo, patch or cutoff, with fresh output filenames. The current bridge renders the dry worklet. Apply delay, chorus and reverb in LMMS as needed. The audio clip references an absolute WAV path, so relink it when moving the project.
 
+Search for `dark arp`, `sub bass`, `metallic bell` or `warm organ` with `search_sounds`. Audition a result by passing its `patchId` or `preset` and a fresh WAV filename to `preview_sound`. Reuse the same patch ID in `render_fathom_track` or the same preset path in `apply_preset`. Stock search covers preset names and families. Some presets need a MIDI root suited to their range.
+
+## Codex and Claude Code skill
+
+Copy [the LMMS game audio skill](skills/lmms-game-audio/SKILL.md) with its directory into `.agents/skills/` for Codex or `.claude/skills/` for Claude Code in your project. Configure the MCP separately using the setup above.
+
 ## Roadmap
 
-- Add a searchable sound catalogue with timbre, role and genre tags, short previews and exact patch or instrument selectors.
+- Expand the sound catalogue with richer native preset tags for timbre, role and genre.
 - Expose bounded, instrument-specific parameters and expand automation beyond cutoff. Save render settings alongside arrangements so edits can be rebounced without reconstructing the render call.
 - Add adaptive game exports with aligned intensity layers, intros, stingers and one-shot manifests.
 - Expand the sound palette with instrument packs first, including sampled guitars, designed drums and voice one-shots. Consider new engines for playing behaviours the packs cannot capture, such as expressive sustained strings.

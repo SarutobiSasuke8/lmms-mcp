@@ -12,6 +12,7 @@ import { deflateSync, inflateSync } from 'node:zlib';
 import midiPackage from '@tonejs/midi';
 import { createConnection } from 'node:net';
 import { renderFathom } from './fathom.mjs';
+import { fathomPatches, searchSounds } from './catalogue.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(process.env.LMMS_WORKSPACE ?? process.cwd());
@@ -24,6 +25,7 @@ const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
 const wavName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.wav$/i);
+const patchId = z.enum(Object.keys(fathomPatches));
 const note = z.object({
   tick: z.number().int().min(0), length: z.number().int().min(1),
   midi: z.number().int().min(12).max(119), velocity: z.number().int().min(1).max(100),
@@ -130,6 +132,13 @@ function tool(name, description, inputSchema, handler) {
     }
   });
 }
+function createSong(bpm, items, mastervol = 86) {
+  const doc = parse('<?xml version="1.0"?><!DOCTYPE lmms-project><lmms-project version="1.0" creator="LMMS" creatorversion="1.2.2" type="song"/>');
+  add(doc.documentElement, 'head', { bpm, mastervol, timesig_numerator: 4, timesig_denominator: 4 });
+  const container = add(add(doc.documentElement, 'song'), 'trackcontainer', { type: 'song' });
+  for (const item of items) addTrack(container, item);
+  return doc;
+}
 tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 ticks, one beat is 48. Drum notes use MIDI 69 at original pitch.', {
   output: projectName, bpm: z.number().int().min(45).max(240), tracks: z.array(track).min(1).max(24),
 }, async ({ output, bpm, tracks: items }) => {
@@ -139,11 +148,7 @@ tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 tick
       throw new Error('Sample tracks require a regular workspace WAV');
     }
   }
-  const doc = parse('<?xml version="1.0"?><!DOCTYPE lmms-project><lmms-project version="1.0" creator="LMMS" creatorversion="1.2.2" type="song"/>');
-  add(doc.documentElement, 'head', { bpm, mastervol: 86, timesig_numerator: 4, timesig_denominator: 4 });
-  const container = add(add(doc.documentElement, 'song'), 'trackcontainer', { type: 'song' });
-  for (const item of items) addTrack(container, item);
-  return save(doc, output);
+  return save(createSong(bpm, items), output);
 });
 tool('inspect_project', 'Read saved instrument tracks, pattern locations and note counts.', { project: projectName },
   async ({ project }) => tracks(await load(project)).map(t => ({
@@ -167,12 +172,14 @@ tool('read_pattern', 'Read the notes in a saved instrument pattern. Bar numbers 
 
 tool('render_fathom_track', 'Render LMMS piano-roll notes through Fathom Atelier’s synth worklet with cutoff automation. Save a WAV and an LMMS copy with the rendered audio and editable source notes.', {
   project: projectName, output: projectName, audio: wavName, trackName: z.string().min(1).max(100),
-  patchFile: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.json$/i),
+  patchFile: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.json$/i).optional(),
+  patchId: patchId.optional(),
   bars: z.number().int().min(1).max(64),
   cutoff: z.array(z.object({ tick: z.number().int().min(0), hz: z.number().min(28).max(20000) })).min(1).max(256),
-}, async ({ project, output, audio, trackName, patchFile, bars, cutoff }) => {
+}, async ({ project, output, audio, trackName, patchFile, patchId: id, bars, cutoff }) => {
   const worklet = process.env.LMMS_FATHOM_WORKLET;
   if (!worklet) throw new Error('Set LMMS_FATHOM_WORKLET to a trusted local Fathom Atelier synth-processor.js');
+  if (Boolean(id) === Boolean(patchFile)) throw new Error('Supply exactly one of patchId or patchFile');
   if (existsSync(path.join(root, output)) || existsSync(path.join(root, audio))) throw new Error('Output already exists');
   const doc = await load(project);
   const [head] = children(doc.documentElement, 'head');
@@ -207,10 +214,15 @@ tool('render_fathom_track', 'Render LMMS piano-roll notes through Fathom Atelier
     }
   }
   if (!notes.length || notes.length > 8192) throw new Error('Expected 1 to 8192 active notes in the render range');
-  const patchPath = path.join(root, patchFile);
-  const info = await lstat(patchPath);
-  if (!info.isFile() || info.size > 65536) throw new Error('Expected a regular Fathom patch JSON file up to 64 KiB');
-  const patch = JSON.parse(await readFile(patchPath, 'utf8'));
+  let patch;
+  if (id) {
+    patch = structuredClone(fathomPatches[id].patch);
+  } else {
+    const patchPath = path.join(root, patchFile);
+    const info = await lstat(patchPath);
+    if (!info.isFile() || info.size > 65536) throw new Error('Expected a regular Fathom patch JSON file up to 64 KiB');
+    patch = JSON.parse(await readFile(patchPath, 'utf8'));
+  }
   if (!patch?.filter || typeof patch.filter !== 'object' || !Number.isFinite(patch.volume) ||
       patch.volume <= 0 || patch.volume > 1 || !['fathom', 'vesper', 'halo'].includes(patch.model)) {
     throw new Error('Expected a complete Fathom Atelier patch with a nonzero volume up to 1');
@@ -289,6 +301,59 @@ async function listPresets() {
 }
 tool('list_presets', 'List installed XML factory preset paths.', {}, listPresets);
 
+tool('search_sounds', 'Find Fathom patches and installed LMMS factory presets by name, engine and sound tags.', {
+  query: z.string().max(120).default(''), engine: z.enum(['fathom', 'lmms']).optional(),
+  limit: z.number().int().min(1).max(100).default(20),
+}, async args => {
+  let native = [];
+  let nativePresetError;
+  if (args.engine !== 'fathom') {
+    try { native = await listPresets(); } catch (error) { nativePresetError = error.code ?? error.message; }
+  }
+  const worklet = process.env.LMMS_FATHOM_WORKLET;
+  return { ...searchSounds(args, native), fathomAvailable: Boolean(worklet && existsSync(worklet)), nativePresetError };
+});
+
+tool('preview_sound', 'Render a short audition of a Fathom patch or stock LMMS preset to a workspace WAV.', {
+  patchId: patchId.optional(), preset: presetFile.optional(), output: wavName,
+  midi: z.number().int().min(24).max(84).optional(),
+}, async ({ patchId: id, preset, output, midi }) => {
+  if (Boolean(id) === Boolean(preset)) throw new Error('Supply exactly one of patchId or preset');
+  if (existsSync(path.join(root, output))) throw new Error('Output already exists');
+  if (preset) {
+    const temp = await mkdtemp(path.join(root, '.preview-'));
+    try {
+      const doc = createSong(120, [{ name: 'Preview', voice: 'pluck', volume: 45, pan: 0,
+        patterns: [{ name: 'Preview', bar: 0, bars: 1,
+          notes: [0, 7, 12, 3].map((offset, i) => ({ tick: i * 36, midi: (midi ?? 57) + offset, length: 29, velocity: 76 })) }] }], 65);
+      await loadPreset(doc, instrumentOf(doc, 'Preview'), preset);
+      const project = path.join(temp, 'preview.mmp');
+      const rendered = path.join(temp, 'preview.wav');
+      await writeFile(project, xml.serializeToString(doc));
+      await run(lmms, ['render', project, '-s', '48000', '-f', 'wav', '-l', '-o', rendered],
+        { cwd: root, timeout: 30000, windowsHide: true });
+      const wav = await readFile(rendered);
+      const stats = measureWav(wav);
+      if (stats.peakDbfs === null) throw new Error('Native preset preview is silent. Try a different MIDI root or preset.');
+      await writeFile(path.join(root, output), wav, { flag: 'wx' });
+      return { preset, audio: output, ...stats };
+    } finally {
+      await rm(temp, { recursive: true });
+    }
+  }
+  const worklet = process.env.LMMS_FATHOM_WORKLET;
+  if (!worklet) throw new Error('Set LMMS_FATHOM_WORKLET to preview Fathom patches');
+  const sound = fathomPatches[id];
+  const patch = structuredClone(sound.patch);
+  const notes = sound.phrase.map(([tick, interval, length, velocity]) => ({
+    tick, midi: (midi ?? sound.root) + interval, length, velocity,
+  }));
+  const wav = await renderFathom({ worklet, patch, notes, cutoff: [{ tick: 0, hz: patch.filter.cutoff }],
+    secondsPerTick: 1 / 96, durationTicks: 192 });
+  await writeFile(path.join(root, output), wav, { flag: 'wx' });
+  return { patchId: id, audio: output, ...measureWav(wav) };
+});
+
 // Instrument plugin IDs used by the stock LMMS 1.2 series.
 const instruments = {
   audiofileprocessor: 'Sample playback', bitinvader: 'Wavetable synthesis', carlarack: 'External plugin host',
@@ -338,11 +403,7 @@ tool('set_native_instrument', 'Load an installed stock LMMS instrument at its de
   add(add(target, 'instrument', { name: instrument }), instrument);
   return save(doc, output);
 });
-tool('apply_preset', 'Load an installed XML preset sound into a track in a new project copy.', {
-  project: projectName, output: projectName, trackName: z.string(), preset: presetFile,
-}, async ({ project, output, trackName, preset }) => {
-  const doc = await load(project);
-  const target = instrumentOf(doc, trackName);
+async function loadPreset(doc, target, preset) {
   const source = new DOMParser().parseFromString(await readFile(path.join(presets, preset), 'utf8'), 'application/xml');
   const settings = Array.from(source.getElementsByTagName('instrumenttrack'))[0];
   if (!settings || !children(settings, 'instrument').length) throw new Error('Expected a native instrument preset with an instrument element');
@@ -360,6 +421,12 @@ tool('apply_preset', 'Load an installed XML preset sound into a track in a new p
   }
   const baseNote = settings.getAttribute('basenote');
   if (baseNote) target.setAttribute('basenote', baseNote);
+}
+tool('apply_preset', 'Load an installed XML preset sound into a track in a new project copy.', {
+  project: projectName, output: projectName, trackName: z.string(), preset: presetFile,
+}, async ({ project, output, trackName, preset }) => {
+  const doc = await load(project);
+  await loadPreset(doc, instrumentOf(doc, trackName), preset);
   return save(doc, output);
 });
 tool('route_mixer_bus', 'Create a mixer bus sending to Master and route named instrument tracks to it.', {
