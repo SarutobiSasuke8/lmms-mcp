@@ -13,6 +13,7 @@ import midiPackage from '@tonejs/midi';
 import { createConnection } from 'node:net';
 import { renderFathom } from './fathom.mjs';
 import { fathomPatches, searchSounds } from './catalogue.mjs';
+import { composerProfiles, composeProfile, describeProfile } from './composers.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(process.env.LMMS_WORKSPACE ?? process.cwd());
@@ -140,6 +141,26 @@ function createSong(bpm, items, mastervol = 86) {
   for (const item of items) addTrack(container, item);
   return doc;
 }
+const profileId = z.enum(Object.keys(composerProfiles));
+tool('list_composer_profiles', 'Find composer studies by name, musical technique or game use.', {
+  query: z.string().max(120).default(''),
+}, async ({ query }) => {
+  const words = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return Object.values(composerProfiles).map(describeProfile).filter(profile => {
+    const text = Object.values(profile).flat().join(' ').toLowerCase();
+    return words.every(word => text.includes(word));
+  });
+});
+tool('create_composer_sketch', 'Write an original editable LMMS sketch based on a composer profile. Uses stock instruments and suggests a Fathom patch for the motif.', {
+  output: projectName, profileId, root: z.number().int().min(48).max(67).default(60),
+  bpm: z.number().int().min(45).max(240).default(120), bars: z.number().int().min(4).max(16).default(4),
+}, async ({ output, profileId: id, root, bpm, bars }) => {
+  const profile = composerProfiles[id];
+  const items = composeProfile(profile, { root, bars });
+  for (const item of items) track.parse(item);
+  return { ...await save(createSong(bpm, items), output), profile: describeProfile(profile), root, bpm, bars,
+    suggestedFathom: { trackName: 'Motif', patchId: profile.patchId } };
+});
 tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 ticks, one beat is 48. Drum notes use MIDI 69 at original pitch.', {
   output: projectName, bpm: z.number().int().min(45).max(240), tracks: z.array(track).min(1).max(24),
 }, async ({ output, bpm, tracks: items }) => {

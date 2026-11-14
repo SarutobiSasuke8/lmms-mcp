@@ -7,6 +7,7 @@
     "server.mjs",
     "fathom.mjs",
     "catalogue.mjs",
+    "composers.mjs",
     "skills/",
     "demo.mjs",
     "art/",

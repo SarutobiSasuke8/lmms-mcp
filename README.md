@@ -28,6 +28,7 @@ For an install that follows a fixed GitHub release, run `npx -y https://github.c
 | `list_presets` / `apply_preset` | Browse installed XML presets and apply compatible instruments and envelopes |
 | `list_instruments` | Discover known stock instrument plugins on disk, usable preset paths and Fathom bridge setup |
 | `search_sounds` / `preview_sound` | Find stock presets and Fathom patches, then audition them as short WAVs |
+| `list_composer_profiles` / `create_composer_sketch` | Find composition studies by technique or game use and generate an editable seed arrangement |
 | `set_native_instrument` | Swap in a discovered stock instrument while keeping the notes and track controls |
 | `render_fathom_track` | Render editable piano-roll notes through Fathom Atelier with a programmable filter sweep |
 | `route_mixer_bus` | Add a named bus routed to master and assign instrument tracks |
@@ -80,6 +81,12 @@ Save a full Fathom patch object as JSON in the workspace. Supported model IDs ar
 The bridge uses the written pitches, note lengths and velocities. It interpolates cutoff by frequency ratio and updates the worklet every 128 samples. The project copy keeps the muted source piano-roll track for editing and MIDI export and plays the rendered audio from a sample track. Rerun after editing notes, tempo, patch or cutoff, with fresh output filenames. The current bridge renders the dry worklet. Apply delay, chorus and reverb in LMMS as needed. The audio clip references an absolute WAV path, so relink it when moving the project.
 
 Search for `dark arp`, `sub bass`, `metallic bell` or `warm organ` with `search_sounds`. Audition a result by passing its `patchId` or `preset` and a fresh WAV filename to `preview_sound`. Reuse the same patch ID in `render_fathom_track` or the same preset path in `apply_preset`. Stock search covers preset names and families. Some presets need a MIDI root suited to their range.
+
+## Composer profiles
+
+Search for `victory`, `whole-tone`, `counterpoint`, `jrpg` or `minimalism` with `list_composer_profiles`. Pass a result's ID to `create_composer_sketch` along with an output filename, MIDI root, tempo and bar count. The sketch works with stock LMMS and returns a suggested Fathom patch ID for its motif track. Open it in LMMS or render it with `render_mix`.
+
+The profiles are original studies in musical techniques. `jrpg-battle` references [Nobuo Uematsu](https://www.jp.square-enix.com/music/sem/page/MODULATION/en/) and `additive-pulse` references [Philip Glass’s additive process](https://philipglass.com/recordings/two_pages/). The sketches contain original notes and stock LMMS sounds.
 
 ## Codex and Claude Code skill
 
