@@ -37,7 +37,10 @@ const instructions = [
   'Preserve the editable MMP or MMPZ and its referenced samples. A beat is 48 ticks and a 4/4 bar is 192 ticks. Project bars start at zero.',
   'Stock LMMS handles saved projects. Fathom rendering and Windows live control require optional local components.',
   'Use list_external_tools to discover optional VST3 instruments and related setup instructions.',
+  'Arrangement rules: give every track a role (drums, bass, harmony, lead, counter, texture or fx). One lead melody at a time, with at most one counter-melody under it. Bass and harmony support the lead and stay out of its register. Build sections by repeating and varying one motif, and leave space.',
 ].join(' ');
+// Feature modules in tools/ add their own guidance here; get_started returns it.
+const moduleGuidance = [];
 const server = new McpServer({ name: 'lmms-project-tools', version: '0.7.0' }, { instructions });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
@@ -86,9 +89,14 @@ const track = z.object({
   sample: workspaceWav.optional(), factorySample: factorySample.optional().describe('Stock LMMS sample such as "drums/snare01.ogg". See list_samples.'),
   preset: presetFile.optional(),
   rootMidi: z.number().int().min(12).max(119).default(69),
+  role: z.enum(['drums', 'bass', 'harmony', 'lead', 'counter', 'texture', 'fx']).optional()
+    .describe('What the track is for. Use one lead at a time and at most one counter-melody.'),
   volume, pan: z.number().int().min(-100).max(100).default(0),
   patterns: z.array(pattern).min(1).max(64),
 });
+// What a track is for in the arrangement. Stored on the track so lint, balance and export tools can read it.
+const roleNames = ['drums', 'bass', 'harmony', 'lead', 'counter', 'texture', 'fx'];
+const trackRole = t => roleNames.includes(t.getAttribute('mcp-role')) ? t.getAttribute('mcp-role') : null;
 const kit = { kick: 'kick_soft01', clap: 'clap01', hat: 'hihat_closed01' };
 const tones = {
   pluck: { waves: [1, 2, 0], gains: [33, 14, 18], cutoff: 3400, sustain: .24, decay: .22, release: .075 },
@@ -198,6 +206,7 @@ async function checkTrack(item) {
 }
 function addTrack(parent, item) {
   const target = add(parent, 'track', { muted: 0, solo: 0, type: 0, name: item.name });
+  if (item.role) target.setAttribute('mcp-role', item.role);
   const instrumentTrack = add(target, 'instrumenttrack', { vol: item.volume, pan: item.pan, basenote: 57, fxch: 0 });
   if (item.voice === 'sample') {
     instrumentTrack.setAttribute('basenote', String(item.rootMidi - 12));
@@ -350,6 +359,7 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
 });
 tool('get_started', 'Read the LMMS MCP workflow and discover the local setup before composing, editing or exporting.', {}, async () => ({
   instructions,
+  moduleGuidance,
   workspace: root,
   setup: {
     lmmsExecutable: lmms,
@@ -1315,6 +1325,7 @@ tool('inspect_arrangement', 'Read tempo, metre, song length, master volume, mixe
       const number = key => instrument?.hasAttribute(key) ? Number(instrument.getAttribute(key)) : children(instrument, key).length ? 'automated' : undefined;
       return {
         name: t.getAttribute('name'), type: Number(t.getAttribute('type')),
+        ...(trackRole(t) ? { role: trackRole(t) } : {}),
         ...(isAnchor(t) ? { role: 'length pin' } : {}),
         instrument: instrument ? children(instrument, 'instrument')[0]?.getAttribute('name') ?? null : null,
         mixerChannel: instrument ? Number(instrument.getAttribute('fxch')) : null,
@@ -1492,6 +1503,28 @@ edit('edit_sample_clip', 'Place, move, duplicate, resize, mute, relink or remove
     original.removeAttribute('sample_rate');
   }
 });
+edit('set_track_role', 'Declare what an instrument track is for: drums, bass, harmony, lead, counter, texture or fx. Pass null to clear it.', {
+  trackName: z.string(), role: z.enum(roleNames).nullable(),
+}, (doc, { trackName, role }) => {
+  const target = instrumentOf(doc, trackName).parentNode;
+  if (role === null) target.removeAttribute('mcp-role');
+  else target.setAttribute('mcp-role', role);
+});
+
+// ---------- feature modules ----------
+// Every .mjs file in tools/ exports register(context) and adds its own tools and edits. See tools/README.md.
+const toolContext = {
+  tool, edit, edits, z, dsp, root, imagesKey, explain, moduleGuidance,
+  schemas: { projectName, wavName, audioOut, workspaceWav, factorySample, folderName, pattern, track, note, volume, presetFile,
+    loudnessTarget, ceilingTarget, tailMode, section, pngName },
+  project: { load, save, parse, tracks, container, children, elements, add, songInfo, setAnchor, isAnchor, isControl, instrumentOf,
+    findPattern, createSong, addTrack, addPattern, checkTrack, mixerOf, busOf, chainOf, writeEffect, loadPreset, roleNames, trackRole },
+  render: { renderDoc, renderMix, forRender, isolate, pool, parallelRenders, writeAudio, hasFfmpeg, masterAudio, barFrames, measureWav },
+  music: { expandPattern, parseChord, voiceChord, bassNote, chordQualities },
+  sounds: { soundFacts, listPresets, listZynPresets, effectTypes },
+};
+const toolModules = (await readdir(new URL('./tools/', import.meta.url)).catch(() => [])).filter(name => name.endsWith('.mjs')).sort();
+for (const file of toolModules) await (await import(new URL('./tools/' + file, import.meta.url))).register(toolContext);
 tool('apply_edits', 'Apply many edits to one project and save once. Use this for mixing passes and arrangement changes instead of one file per change. If any edit fails, nothing is written. Ops: ' + Object.keys(edits).join(', ') + '. Each edit takes the same arguments as the tool of that name, without project and output.', {
   project: projectName, output: projectName,
   overwrite: z.boolean().default(false).describe('Allow replacing an existing output, including the source project itself.'),

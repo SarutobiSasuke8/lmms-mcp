@@ -12,6 +12,7 @@
     "audio.mjs",
     "music.mjs",
     "effects.mjs",
+    "tools/",
     "sound-catalogue.json",
     "skills/",
     "demo.mjs",
@@ -31,7 +32,7 @@
   },
   "scripts": {
     "demo": "node demo.mjs",
-    "test": "node --test test.mjs",
+    "test": "node --test test.mjs \"tools/*.test.mjs\"",
     "verify": "node verify-exports.mjs && node verify-game-audio.mjs"
   },
   "dependencies": {
