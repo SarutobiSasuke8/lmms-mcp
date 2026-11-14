@@ -2,7 +2,7 @@
 // build_audition_page writes one self-contained HTML file that plays an export_game_audio folder (intro into loop, layers,
 // stingers) or compares workspace renders at matched loudness. The listener's notes come back as JSON through read_feedback,
 // and durable preferences live in .lmms-taste.json through remember_taste and get_taste.
-import { lstat, readFile, readdir, writeFile, rename } from 'node:fs/promises';
+import { lstat, readFile, readdir, writeFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 export const feedbackSchema = 'lmms-mcp/audition-feedback';
@@ -54,7 +54,40 @@ export function secondsToNextBar(seconds, bpm, meter) {
   const next = Math.ceil(seconds / bar - 1e-6) * bar;
   return Math.max(0, next - seconds);
 }
-const pageMaths = [barSeconds, barBeatAt, wrapSongTime, startPlan, sectionAt, secondsToNextBar];
+// Context time for a stinger: the next bar line when quantised (a bar later when the line is under 10 ms away and too
+// near to schedule), otherwise 20 ms from now. Always a whole frame at the context rate.
+export function stingerTime(now, songSeconds, bpm, meter, rate, quantise) {
+  let at = now + 0.02;
+  if (quantise) {
+    let wait = secondsToNextBar(songSeconds, bpm, meter);
+    if (wait < 0.01) wait += barSeconds(bpm, meter);
+    at = now + wait;
+  }
+  return Math.round(at * rate) / rate;
+}
+// Match files the listener picked to the paths the page needs. A folder pick gives "<chosen folder>/<path inside>", which
+// must equal the page-relative path. Loose files match by name only when no two needed paths share that name.
+export function matchPicked(needed, picked) {
+  const files = {}, missing = [], ambiguous = [];
+  const lower = text => text.toLowerCase();
+  const baseOf = text => lower(text).split('/').pop();
+  for (const src of needed) {
+    const want = lower(src);
+    let hits = [];
+    picked.forEach((file, index) => { if (file.path && lower(file.path).split('/').slice(1).join('/') === want) hits.push(index); });
+    if (!hits.length) {
+      const loose = [];
+      picked.forEach((file, index) => { if (!file.path && lower(file.name) === baseOf(src)) loose.push(index); });
+      if (loose.length && needed.filter(other => baseOf(other) === baseOf(src)).length > 1) { ambiguous.push(src); continue; }
+      hits = loose;
+    }
+    if (hits.length === 1) files[src] = hits[0];
+    else if (hits.length > 1) ambiguous.push(src);
+    else missing.push(src);
+  }
+  return { files, missing, ambiguous };
+}
+const pageMaths = [barSeconds, barBeatAt, wrapSongTime, startPlan, sectionAt, secondsToNextBar, stingerTime, matchPicked];
 
 // ---------- page model ----------
 // Sections are given in song bars from zero. Missing lengths run to the next section or the end of the song.
@@ -78,11 +111,22 @@ export function matchLoudness(lufsList) {
   return lufsList.map(value => typeof value === 'number' && Number.isFinite(value) ? Number((target - value).toFixed(2)) : 0);
 }
 const posix = value => value.split(path.sep).join('/');
+const plainName = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
+const plainAudioFile = /^[a-z0-9][a-z0-9_-]{0,119}\.(wav|ogg)$/i;
 
 // Build the page model for an export_game_audio manifest. `base` is the manifest's folder relative to the page ('' when
 // the page sits beside it).
 export function gameModel(manifest, { sections, title, spectrogram, base = '', manifestFile } = {}) {
   if (!manifest || typeof manifest !== 'object' || !manifest.loop?.file) throw new Error('Expected an export_game_audio manifest with a loop');
+  // The manifest is a workspace file anyone could edit: its name becomes the page name and its files become page sources,
+  // so both must be plain names in the manifest's own folder.
+  if (typeof manifest.name !== 'string' || !plainName.test(manifest.name)) throw new Error(`Manifest name ${JSON.stringify(manifest.name)} is not a plain name (letters, digits, - and _)`);
+  for (const file of [manifest.loop.file, manifest.intro?.file, ...(manifest.files ?? []).map(entry => entry?.file)]) {
+    if (file !== undefined && (typeof file !== 'string' || !plainAudioFile.test(file))) throw new Error(`Manifest file ${JSON.stringify(file)} is not a plain WAV or OGG name in the export folder`);
+  }
+  for (const entry of manifest.files ?? []) if (entry?.role === 'layer' && (typeof entry.layer !== 'string' || !entry.layer)) throw new Error('Manifest layer entry has no layer name');
+  if (!Number.isInteger(manifest.loop.endFrame) || !Number.isInteger(manifest.loop.startFrame ?? 0) || manifest.loop.endFrame <= (manifest.loop.startFrame ?? 0)) throw new Error('Manifest loop frames are not valid');
+  if (!(manifest.bpm > 0)) throw new Error('Manifest has no tempo');
   const sampleRate = manifest.sampleRate ?? 48000;
   const meter = manifest.timeSignature ?? [4, 4];
   const files = manifest.files ?? [];
@@ -246,8 +290,9 @@ function auditionPage() {
   for (const layer of config.layers) needed.push(layer.src);
   for (const stinger of config.stingers) needed.push(stinger.src);
   for (const file of config.compare) needed.push(file.src);
-  const introSeconds = () => config.intro ? state.buffers[config.intro.src].length / sr : 0;
-  const loopSeconds = () => isGame ? state.buffers[config.loop.src].length / sr : state.buffers[config.compare[state.active].src].length / sr;
+  // Durations come from the decoded buffers, which are at the context rate even when the browser resampled.
+  const introSeconds = () => config.intro ? state.buffers[config.intro.src].duration : 0;
+  const loopSeconds = () => isGame ? state.buffers[config.loop.src].duration : state.buffers[config.compare[state.active].src].duration;
   const spanSeconds = () => introSeconds() + loopSeconds();
 
   function makeContext() {
@@ -262,9 +307,24 @@ function auditionPage() {
       state.buffers[src] = await state.ctx.decodeAudioData(data);
       frames[src] = state.buffers[src].length;
     }
+    // Compared files of different lengths are padded with silence to the longest, so they share one loop and stay in step
+    // after every wrap.
+    if (!isGame && config.compare.length > 1) {
+      const longest = Math.max.apply(null, config.compare.map(file => state.buffers[file.src].length));
+      for (const file of config.compare) {
+        const buffer = state.buffers[file.src];
+        if (buffer.length === longest) continue;
+        const padded = state.ctx.createBuffer(buffer.numberOfChannels, longest, buffer.sampleRate);
+        for (let c = 0; c < buffer.numberOfChannels; c++) padded.copyToChannel(buffer.getChannelData(c), c);
+        state.buffers[file.src] = padded;
+        state.padded = true;
+      }
+      if (state.padded) $('compareinfo').textContent += ' Shorter files are padded with silence to the longest so all stay in step.';
+    }
     buildGraph();
     $('loader').dataset.ready = 'yes';
     $('loader').dataset.frames = JSON.stringify(frames);
+    $('loader').dataset.playFrames = JSON.stringify(Object.fromEntries(needed.map(src => [src, state.buffers[src].length])));
     $('loader').dataset.contextRate = String(state.ctx.sampleRate);
     status('Ready. ' + needed.length + ' file' + (needed.length === 1 ? '' : 's') + ' decoded at ' + state.ctx.sampleRate + ' Hz' +
       (state.ctx.sampleRate !== sr ? ' (the browser resampled from ' + sr + ' Hz)' : '') + '.');
@@ -326,12 +386,12 @@ function auditionPage() {
     }
   }
   function fromPicker(list) {
-    const byName = {};
-    for (const file of list) byName[file.name.toLowerCase()] = file;
-    const missing = needed.filter(src => !byName[src.split('/').pop().toLowerCase()]);
-    if (missing.length) { status('Missing: ' + missing.join(', '), true); return; }
+    const files = Array.from(list);
+    const match = matchPicked(needed, files.map(file => ({ name: file.name, path: file.webkitRelativePath || '' })));
+    if (match.ambiguous.length) { status('These files share a name with another file the page needs: ' + match.ambiguous.join(', ') + '. Use Choose folder and pick the folder that holds this page.', true); return; }
+    if (match.missing.length) { status('Missing: ' + match.missing.join(', ') + '. Pick the folder that holds this page.', true); return; }
     status('Decoding...');
-    decodeAll(src => byName[src.split('/').pop().toLowerCase()].arrayBuffer()).catch(error => status('Could not decode the audio: ' + error.message, true));
+    decodeAll(src => files[match.files[src]].arrayBuffer()).catch(error => status('Could not decode the audio: ' + error.message, true));
   }
   $('pickfolder').onclick = () => $('folderinput').click();
   $('pickfiles').onclick = () => $('filesinput').click();
@@ -414,11 +474,14 @@ function auditionPage() {
     state.startCtx = when; state.startSong = songSeconds; state.playing = true;
     $('play').textContent = 'Pause';
   }
-  function songTime() {
+  function songTime(now) {
     if (!state.ctx) return 0;
     if (!state.playing) return state.pausedAt;
-    const elapsed = Math.max(0, state.ctx.currentTime - state.startCtx) + state.startSong;
+    const elapsed = Math.max(0, (now === undefined ? state.ctx.currentTime : now) - state.startCtx) + state.startSong;
     return wrapSongTime(elapsed, introSeconds(), loopSeconds());
+  }
+  function stingerStart(now) {
+    return stingerTime(now, songTime(now), config.bpm, config.timeSignature, state.ctx.sampleRate, state.playing && timed && $('quantise').checked);
   }
   async function play(from) {
     if (!state.ctx) return;
@@ -524,8 +587,7 @@ function auditionPage() {
       button.onclick = async () => {
         if (!state.ctx) return;
         if (state.ctx.state === 'suspended') await state.ctx.resume();
-        const wait = state.playing && timed && $('quantise').checked ? secondsToNextBar(songTime(), config.bpm, config.timeSignature) : 0;
-        source(state.buffers[stinger.src], state.nodes.stingers, false).start(state.ctx.currentTime + 0.02 + wait);
+        source(state.buffers[stinger.src], state.nodes.stingers, false).start(stingerStart(state.ctx.currentTime));
       };
       $('stingers').appendChild(button);
     }
@@ -673,6 +735,8 @@ export function parseFeedback(input) {
   if (data.schema !== feedbackSchema) throw new Error(`Expected schema "${feedbackSchema}", got ${JSON.stringify(data.schema)}`);
   if (data.version !== feedbackVersion) throw new Error(`Unsupported feedback version ${JSON.stringify(data.version)}; this server reads version ${feedbackVersion}`);
   if (!Array.isArray(data.notes)) throw new Error('Feedback has no notes array');
+  if (data.notes.length > maxFeedbackNotes * 10) throw new Error(`Feedback holds ${data.notes.length} notes; at most ${maxFeedbackNotes * 10} can be read`);
+  if (Array.isArray(data.sections) && data.sections.length > 200) throw new Error('Feedback holds more than 200 sections');
   const sections = (Array.isArray(data.sections) ? data.sections : []).filter(section => section && typeof section.name === 'string').map(section => ({
     name: cleanText(section.name, 60), startBar: finite(section.startBar) ? section.startBar : null, bars: finite(section.bars) ? section.bars : null,
     rating: rating(section.rating),
@@ -717,18 +781,22 @@ function context(note) {
   return parts.join('; ');
 }
 // Group feedback by section and bar so an agent can turn each note into an edit at the right place.
+export const maxFeedbackNotes = 300;
 export function organiseFeedback(feedback) {
+  // Output is capped so a long session cannot flood the agent's context: the earliest notes are kept and the rest counted.
+  const all = [...feedback.notes].sort((a, b) => a.seconds - b.seconds);
+  const kept = all.slice(0, maxFeedbackNotes);
   const sections = feedback.sections.map(section => ({ ...section, endBar: section.startBar !== null && section.bars !== null ? section.startBar + section.bars : null, notes: [] }));
   const outside = [];
-  for (const note of feedback.notes) {
+  for (const note of kept) {
     const entry = { bar: note.bar, beat: note.beat, seconds: note.seconds, text: note.text, rating: note.rating, heard: context(note) || undefined };
     const home = sections.find(section => section.name === note.section) ??
       (note.bar !== null ? sections.find(section => section.startBar !== null && note.bar >= section.startBar && note.bar < section.endBar) : undefined);
     (home ? home.notes : outside).push(entry);
   }
   const byBar = {};
-  for (const note of feedback.notes) if (note.bar !== null) (byBar[note.bar] ??= []).push(note.text || `rated ${note.rating}/5`);
-  const ratings = [...sections.map(section => section.rating), ...feedback.notes.map(note => note.rating)].filter(value => value !== null);
+  for (const note of kept) if (note.bar !== null) (byBar[note.bar] ??= []).push(note.text || `rated ${note.rating}/5`);
+  const ratings = [...sections.map(section => section.rating), ...all.map(note => note.rating)].filter(value => value !== null);
   const lines = [];
   for (const section of sections) {
     if (section.rating === null && !section.notes.length) continue;
@@ -740,7 +808,7 @@ export function organiseFeedback(feedback) {
   const weakest = sections.filter(section => section.rating !== null).sort((a, b) => a.rating - b.rating)[0];
   return {
     title: feedback.title, source: feedback.source, savedAt: feedback.savedAt, bpm: feedback.bpm, timeSignature: feedback.timeSignature,
-    noteCount: feedback.notes.length, averageRating: ratings.length ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(2)) : null,
+    noteCount: all.length, ...(all.length > kept.length ? { omittedNotes: all.length - kept.length } : {}), averageRating: ratings.length ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(2)) : null,
     weakestSection: weakest ? { name: weakest.name, rating: weakest.rating } : null,
     sections, outsideSections: outside, byBar, summary: lines,
   };
@@ -748,18 +816,61 @@ export function organiseFeedback(feedback) {
 
 // ---------- taste memory ----------
 const normalise = text => text.toLowerCase().replace(/\s+/g, ' ').replace(/[.!]+$/, '').trim();
+export const maxTasteEntries = 500;
+export const maxTasteBytes = 1048576;
+export const maxTasteText = 400;
+const repairHint = `Call remember_taste with repair: true to back it up and keep the valid entries.`;
 export function emptyTaste() { return { version: 1, entries: [] }; }
+// Why one stored entry is unusable, or null when it is fine.
+function tasteEntryProblem(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return 'is not an object';
+  if (typeof entry.id !== 'string' || !/^t\d{1,6}$/.test(entry.id)) return `has id ${JSON.stringify(entry.id)}, expected t followed by digits`;
+  if (!tasteAreas.includes(entry.area)) return `has unknown area ${JSON.stringify(entry.area)}`;
+  if (typeof entry.text !== 'string' || !entry.text.trim() || entry.text.length > maxTasteText) return `needs text of 1 to ${maxTasteText} characters`;
+  if (entry.source !== undefined && typeof entry.source !== 'string') return 'has a source that is not text';
+  if (entry.addedAt !== undefined && typeof entry.addedAt !== 'string') return 'has an addedAt that is not text';
+  return null;
+}
+const cleanEntry = entry => ({ id: entry.id, area: entry.area, text: entry.text, ...(entry.source !== undefined ? { source: entry.source.slice(0, 200) } : {}),
+  ...(entry.addedAt !== undefined ? { addedAt: entry.addedAt } : {}) });
+// Read the taste file strictly. Every error names the file and says how to recover.
 export function parseTaste(text) {
-  const data = JSON.parse(text);
-  if (!data || data.version !== 1 || !Array.isArray(data.entries)) throw new Error(`${tasteFile} is not a version 1 taste file`);
-  return data;
+  if (text.length > maxTasteBytes) throw new Error(`${tasteFile} is larger than ${maxTasteBytes / 1048576} MiB. ${repairHint}`);
+  let data;
+  try { data = JSON.parse(text); } catch (error) { throw new Error(`${tasteFile} is not valid JSON (${error.message}). ${repairHint}`); }
+  if (!data || typeof data !== 'object' || data.version !== 1 || !Array.isArray(data.entries)) throw new Error(`${tasteFile} is not a version 1 taste file. ${repairHint}`);
+  if (data.entries.length > maxTasteEntries) throw new Error(`${tasteFile} holds ${data.entries.length} entries, more than ${maxTasteEntries}. ${repairHint}`);
+  const seen = new Set();
+  data.entries.forEach((entry, index) => {
+    const problem = tasteEntryProblem(entry) ?? (seen.has(entry.id) ? `repeats id ${entry.id}` : null);
+    if (problem) throw new Error(`${tasteFile} entry ${index + 1} ${problem}. ${repairHint}`);
+    seen.add(entry.id);
+  });
+  return { version: 1, entries: data.entries.map(cleanEntry) };
+}
+// Keep whatever can be kept from a damaged taste file. Never throws.
+export function salvageTaste(text) {
+  let data;
+  try { data = JSON.parse(text); } catch { return { store: emptyTaste(), dropped: 'all: the file was not valid JSON' }; }
+  const entries = [], seen = new Set();
+  let dropped = 0;
+  for (const entry of Array.isArray(data?.entries) ? data.entries : []) {
+    if (tasteEntryProblem(entry) || seen.has(entry.id) || entries.length >= maxTasteEntries) { dropped++; continue; }
+    seen.add(entry.id);
+    entries.push(cleanEntry(entry));
+  }
+  if (!Array.isArray(data?.entries)) return { store: emptyTaste(), dropped: 'all: the file had no entries list' };
+  return { store: { version: 1, entries }, dropped };
 }
 // Add a preference, or return the existing one when the same words are already stored for that area.
 export function addTaste(store, { text, area = 'general', source }, now = new Date().toISOString()) {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (!clean) throw new Error('A preference needs some text');
+  if (clean.length > maxTasteText) throw new Error(`A preference is at most ${maxTasteText} characters`);
+  if (!tasteAreas.includes(area)) throw new Error(`Unknown area ${JSON.stringify(area)}`);
   const existing = store.entries.find(entry => entry.area === area && normalise(entry.text) === normalise(clean));
   if (existing) return { store, entry: existing, added: false };
+  if (store.entries.length >= maxTasteEntries) throw new Error(`${tasteFile} already holds ${maxTasteEntries} preferences; forget some first`);
   const next = Math.max(0, ...store.entries.map(entry => Number(String(entry.id).replace(/^t/, '')) || 0)) + 1;
   const entry = { id: `t${next}`, area, text: clean, ...(source ? { source } : {}), addedAt: now };
   return { store: { ...store, entries: [...store.entries, entry] }, entry, added: true };
@@ -787,6 +898,7 @@ export function register({ tool, z, dsp, root, schemas, moduleGuidance }) {
     'Call get_taste before composing or mixing and follow the listener\'s stored preferences; save new ones with remember_taste when feedback states a lasting preference.',
     'Before asking the listener to judge music, run build_audition_page on the export folder (or on two renders to A/B them) and give them the page path; read their notes back with read_feedback.',
   );
+  // Every path read or written goes through here, whether it came from a tool argument or from a file in the workspace.
   const inside = relative => {
     const full = path.resolve(root, relative);
     if (full !== root && !full.startsWith(root + path.sep)) throw new Error('Expected a path inside the workspace');
@@ -804,10 +916,16 @@ export function register({ tool, z, dsp, root, schemas, moduleGuidance }) {
     if (!overwrite) {
       try { await lstat(full); throw new Error(`${path.basename(full)} already exists; pass overwrite: true to replace it`); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
-    const temporary = full + '.tmp-' + process.pid;
-    await writeFile(temporary, text);
-    await rename(temporary, full);
+    const temporary = `${full}.tmp-${process.pid}-${++temporaryCount}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      await writeFile(temporary, text, { flag: 'wx' });
+      await rename(temporary, full);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
   };
+  let temporaryCount = 0;
   const sectionSchema = z.object({ name: z.string().min(1).max(60), startBar: z.number().min(0), bars: z.number().min(0.25).optional() });
 
   tool('build_audition_page', 'Write a self-contained HTML page so a person can listen to and judge the music in seconds. Give either an export_game_audio folder (plays the intro into the loop gaplessly, with layer faders, mute and solo, stinger buttons and section jumps) or one to four workspace WAV or OGG files (played in sync and switched A/B at matched loudness). The listener rates sections and pins notes to the time, bar and layer state, then saves or copies feedback JSON for read_feedback. No network access; audio is referenced by relative path.', {
@@ -848,7 +966,7 @@ export function register({ tool, z, dsp, root, schemas, moduleGuidance }) {
       try { manifest = JSON.parse(await readFile(manifestPath, 'utf8')); } catch (error) { throw new Error(`${manifestName} is not valid JSON: ${error.message}`); }
       if (bpm || timeSignature) notes.push('bpm and timeSignature come from the manifest for a game folder; the given values were ignored.');
       model = gameModel(manifest, { sections, title, spectrogram: spectrogramSrc, manifestFile: manifestName });
-      for (const asset of pageAssets(model).filter(src => src !== spectrogramSrc)) await regularFile(path.join(pageDir, asset), `${folder}/${asset}`);
+      for (const asset of pageAssets(model).filter(src => src !== spectrogramSrc)) await regularFile(inside(path.join(pageDir, asset)), `${folder}/${asset}`);
       if (model.warnings) notes.push(...model.warnings);
     } else {
       const measured = [];
@@ -874,8 +992,10 @@ export function register({ tool, z, dsp, root, schemas, moduleGuidance }) {
       model = compareModel(measured, { sections, title, spectrogram: spectrogramSrc, bpm, timeSignature, sampleRate, name: files.length > 1 ? `${base}-ab` : base });
     }
     const pageName = output ?? `${model.name}-audition.html`;
+    if (!/^[a-z0-9][a-z0-9_-]{0,100}\.html$/i.test(pageName)) throw new Error(`Page name ${JSON.stringify(pageName)} is not a plain file name`);
     const html = renderPage(model, { pageName });
-    const pagePath = path.join(pageDir, pageName);
+    const pagePath = inside(path.join(pageDir, pageName));
+    if (path.dirname(pagePath) !== pageDir) throw new Error('The page must be written beside its audio');
     await writeAtomic(pagePath, html, overwrite);
     const relativePage = posix(path.relative(root, pagePath));
     return {
@@ -905,27 +1025,65 @@ export function register({ tool, z, dsp, root, schemas, moduleGuidance }) {
     return { ...(file ? { file } : {}), ...organiseFeedback(parseFeedback(raw)) };
   });
 
-  const tastePath = path.join(root, tasteFile);
-  const loadTaste = async () => {
-    let text;
-    try { text = await readFile(tastePath, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return emptyTaste(); throw error; }
-    return parseTaste(text);
+  const tastePath = inside(tasteFile);
+  const readTasteText = async () => {
+    let info;
+    try { info = await lstat(tastePath); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    if (!info.isFile()) throw new Error(`${tasteFile} is not a regular file`);
+    if (info.size > maxTasteBytes) throw new Error(`${tasteFile} is larger than ${maxTasteBytes / 1048576} MiB. ${repairHint}`);
+    return readFile(tastePath, 'utf8');
   };
-  tool('remember_taste', `Store a lasting listener preference in ${tasteFile} in the workspace, for example "leads too busy, keep melodies sparse" or "less reverb on drums". Later sessions read it with get_taste. Repeated wording is stored once. Pass forget with entry ids to remove preferences that no longer hold.`, {
-    text: z.string().min(1).max(400).optional(),
+  const loadTaste = async () => {
+    const text = await readTasteText();
+    return text === null ? emptyTaste() : parseTaste(text);
+  };
+  // Writes are serialised: one queue inside this server, and a lock file against a second server on the same workspace.
+  let tasteQueue = Promise.resolve();
+  const lockPath = tastePath + '.lock';
+  const withTasteLock = work => {
+    const run = tasteQueue.then(async () => {
+      for (let attempt = 0; ; attempt++) {
+        try { await writeFile(lockPath, String(process.pid), { flag: 'wx' }); break; } catch (error) {
+          if (error.code !== 'EEXIST') throw error;
+          const age = await lstat(lockPath).then(info => Date.now() - info.mtimeMs, () => 0);
+          if (age > 10000) { await rm(lockPath, { force: true }); continue; }
+          if (attempt > 200) throw new Error(`${tasteFile} is locked by another process (${path.basename(lockPath)})`);
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+      }
+      try { return await work(); } finally { await rm(lockPath, { force: true }).catch(() => {}); }
+    });
+    tasteQueue = run.catch(() => {});
+    return run;
+  };
+  tool('remember_taste', `Store a lasting listener preference in ${tasteFile} in the workspace, for example "leads too busy, keep melodies sparse" or "less reverb on drums". Later sessions read it with get_taste. Repeated wording is stored once. Pass forget with entry ids to remove preferences that no longer hold. Pass repair: true to recover from a damaged file: the original is kept as a backup and the valid entries are kept.`, {
+    text: z.string().min(1).max(maxTasteText).optional(),
     area: z.enum(tasteAreas).default('general').describe('What the preference is about: a track role, the mix, the arrangement, sound choice or general.'),
     source: z.string().max(200).optional().describe('Where it came from, for example a feedback file name.'),
     forget: z.array(z.string().regex(/^t\d{1,6}$/)).max(50).optional(),
-  }, async ({ text, area, source, forget }) => {
-    if (!text && !forget?.length) throw new Error('Give text to remember or forget ids to remove');
-    let store = await loadTaste();
+    repair: z.boolean().default(false).describe(`Back up a damaged ${tasteFile} and keep only its valid entries.`),
+  }, async ({ text, area, source, forget, repair }) => withTasteLock(async () => {
+    if (!text && !forget?.length && !repair) throw new Error('Give text to remember, forget ids to remove, or repair: true');
+    let store, repaired;
+    if (repair) {
+      const raw = await readTasteText().catch(error => { if (/larger than/.test(error.message)) return ''; throw error; });
+      if (raw === null) store = emptyTaste();
+      else {
+        const salvaged = salvageTaste(raw);
+        const backup = `${tasteFile}.broken-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+        await rename(tastePath, inside(backup));
+        store = salvaged.store;
+        repaired = { kept: store.entries.length, dropped: salvaged.dropped, backup };
+      }
+    } else store = await loadTaste();
     if (forget?.length) store = forgetTaste(store, forget);
     let result;
     if (text) result = addTaste(store, { text, area, source });
     if (result) store = result.store;
     await writeAtomic(tastePath, JSON.stringify(store, null, 2) + '\n', true);
-    return { file: tasteFile, ...(result ? { entry: result.entry, added: result.added } : {}), ...(forget?.length ? { forgotten: forget } : {}), count: store.entries.length };
-  });
+    return { file: tasteFile, ...(result ? { entry: result.entry, added: result.added } : {}), ...(forget?.length ? { forgotten: forget } : {}),
+      ...(repaired ? { repaired } : {}), count: store.entries.length };
+  }));
   tool('get_taste', `Read the listener's stored preferences from ${tasteFile}, grouped by area. Call this before composing or mixing. Pass area to get that area and the general entries.`, {
     area: z.enum(tasteAreas).optional(),
   }, async ({ area }) => {

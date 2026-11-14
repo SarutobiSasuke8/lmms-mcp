@@ -3,10 +3,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
 import { DOMParser } from '@xmldom/xmldom';
+import { mkdtemp, mkdir, writeFile, readdir, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { z } from 'zod';
+import * as dsp from '../audio.mjs';
 import {
   barSeconds, barBeatAt, wrapSongTime, startPlan, sectionAt, secondsToNextBar, normaliseSections, matchLoudness,
   gameModel, compareModel, renderPage, pageAssets, parseFeedback, organiseFeedback, feedbackSchema,
-  emptyTaste, addTaste, forgetTaste, tasteByArea, parseTaste,
+  emptyTaste, addTaste, forgetTaste, tasteByArea, parseTaste, salvageTaste, maxTasteEntries, maxFeedbackNotes,
+  matchPicked, stingerTime, register,
 } from './audition.mjs';
 
 // The shape export_game_audio writes: 120 bpm 4/4, 2 intro bars, 6 loop bars, two layers and a stinger.
@@ -223,4 +230,142 @@ test('taste memory adds, deduplicates, forgets and groups preferences', () => {
   assert.throws(() => addTaste(store, { text: '   ' }), /needs some text/);
   assert.deepEqual(parseTaste(JSON.stringify(store)), store);
   assert.throws(() => parseTaste('{"version":2,"entries":[]}'), /version 1/);
+});
+
+// ---------- regressions from review ----------
+
+test('a manifest cannot name files or pages outside its folder', () => {
+  assert.throws(() => gameModel({ ...manifest, name: '../../escaped' }), /not a plain name/);
+  assert.throws(() => gameModel({ ...manifest, name: 'a/b' }), /not a plain name/);
+  assert.throws(() => gameModel({ ...manifest, loop: { ...manifest.loop, file: '../secret.wav' } }), /not a plain WAV or OGG name/);
+  assert.throws(() => gameModel({ ...manifest, intro: { ...manifest.intro, file: 'C:/x.wav' } }), /not a plain WAV or OGG name/);
+  assert.throws(() => gameModel({ ...manifest, files: [...manifest.files, { file: '..\\up.wav', role: 'stinger', startBar: 0, bars: 1 }] }), /not a plain WAV or OGG name/);
+  assert.throws(() => gameModel({ ...manifest, files: [...manifest.files, { file: 'x.html', role: 'layer', layer: 'x' }] }), /not a plain WAV or OGG name/);
+  assert.throws(() => gameModel({ ...manifest, loop: { ...manifest.loop, endFrame: 'many' } }), /loop frames/);
+});
+
+test('picked files match by path below the chosen folder, never by a shared base name', () => {
+  const needed = ['v1/theme.wav', 'v2/theme.wav'];
+  const folder = [{ name: 'theme.wav', path: 'work/v2/theme.wav' }, { name: 'theme.wav', path: 'work/v1/theme.wav' }];
+  assert.deepEqual(matchPicked(needed, folder), { files: { 'v1/theme.wav': 1, 'v2/theme.wav': 0 }, missing: [], ambiguous: [] });
+  // Loose files with the same name cannot be told apart.
+  const loose = [{ name: 'theme.wav', path: '' }, { name: 'theme.wav', path: '' }];
+  assert.deepEqual(matchPicked(needed, loose).ambiguous, needed);
+  // Loose files with distinct names still work, and a missing one is reported.
+  assert.deepEqual(matchPicked(['a.wav', 'b.wav'], [{ name: 'B.WAV', path: '' }]), { files: { 'b.wav': 0 }, missing: ['a.wav'], ambiguous: [] });
+  // A folder holding only v1 does not stand in for v2.
+  assert.deepEqual(matchPicked(needed, [folder[1]]).missing, ['v2/theme.wav']);
+});
+
+test('quantised stingers land on the bar line, on a whole frame', () => {
+  const rate = 48000;
+  // Song at 0.5 s into a 2 s bar, context clock at 10 s: the bar line is at 11.5 s.
+  assert.equal(stingerTime(10, 0.5, 120, [4, 4], rate, true), 11.5);
+  // Right on a bar line (or within 10 ms) waits a full bar instead of starting late.
+  assert.equal(stingerTime(10, 2, 120, [4, 4], rate, true), 12);
+  assert.ok(Math.abs(stingerTime(10, 1.995, 120, [4, 4], rate, true) - 12.005) < 1 / rate);
+  // Unquantised: 20 ms from now, rounded to a frame.
+  const loose = stingerTime(10.0000101, 3, 120, [4, 4], rate, false);
+  assert.ok(Math.abs(loose * rate - Math.round(loose * rate)) < 1e-6);
+  assert.ok(Math.abs(loose - 10.02) < 1 / rate);
+  // Every result is a whole frame.
+  for (const song of [0.123, 1.777, 3.3333]) { const at = stingerTime(5.0001, song, 97, [3, 4], rate, true); assert.ok(Math.abs(at * rate - Math.round(at * rate)) < 1e-6); }
+});
+
+test('a damaged taste file names itself, says how to recover, and salvage keeps the valid entries', () => {
+  assert.throws(() => parseTaste('{oops'), /\.lmms-taste\.json is not valid JSON.*repair: true/);
+  assert.throws(() => parseTaste('{"version":1,"entries":[{"id":"t1","area":"lead","text":5}]}'), /\.lmms-taste\.json entry 1 needs text.*repair: true/);
+  assert.throws(() => parseTaste('{"version":1,"entries":[{"id":"t1","area":"moon","text":"x"}]}'), /unknown area/);
+  assert.throws(() => parseTaste(JSON.stringify({ version: 1, entries: [{ id: 't1', area: 'lead', text: 'a' }, { id: 't1', area: 'lead', text: 'b' }] })), /repeats id t1/);
+  assert.throws(() => parseTaste(JSON.stringify({ version: 1, entries: Array.from({ length: maxTasteEntries + 1 }, (_, i) => ({ id: `t${i + 1}`, area: 'mix', text: 'x' })) })), /more than 500/);
+  const salvaged = salvageTaste(JSON.stringify({ version: 1, entries: [{ id: 't1', area: 'lead', text: 'keep' }, { id: 't2', area: 'lead', text: 7 }, null, { id: 't1', area: 'mix', text: 'dupe' }] }));
+  assert.deepEqual(salvaged, { store: { version: 1, entries: [{ id: 't1', area: 'lead', text: 'keep' }] }, dropped: 3 });
+  assert.equal(salvageTaste('not json').store.entries.length, 0);
+  let store = emptyTaste();
+  for (let i = 0; i < maxTasteEntries; i++) store = addTaste(store, { text: `p${i}` }).store;
+  assert.throws(() => addTaste(store, { text: 'one more' }), /already holds 500/);
+});
+
+test('read_feedback output is capped and says how many notes it left out', () => {
+  const many = { ...feedback, notes: Array.from({ length: maxFeedbackNotes + 25 }, (_, i) => ({ seconds: i, bar: Math.floor(i / 2), beat: 1, text: `n${i}` })) };
+  const organised = organiseFeedback(parseFeedback(many));
+  assert.equal(organised.noteCount, maxFeedbackNotes + 25);
+  assert.equal(organised.omittedNotes, 25);
+  const shown = organised.sections.reduce((sum, section) => sum + section.notes.length, organised.outsideSections.length);
+  assert.equal(shown, maxFeedbackNotes);
+  assert.throws(() => parseFeedback({ ...feedback, notes: Array.from({ length: maxFeedbackNotes * 10 + 1 }, () => ({ seconds: 1, text: 'x' })) }), /at most/);
+});
+
+// ---------- the tool handlers, against a temporary workspace ----------
+async function workspaceTools() {
+  const root = await mkdtemp(path.join(tmpdir(), 'lmms-audition-unit-'));
+  const handlers = {}, shapes = {}, moduleGuidance = [];
+  register({ tool: (name, description, schema, handler) => { handlers[name] = handler; shapes[name] = z.object(schema); },
+    z, dsp, root, schemas: { folderName: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i) }, moduleGuidance });
+  const call = async (name, args = {}) => handlers[name](shapes[name].parse(args));
+  return { root, call, moduleGuidance, done: () => rm(root, { recursive: true, force: true }) };
+}
+const wav = (seconds, level) => dsp.encodeWav({ sampleRate: 48000, channels: [0, 1].map(() => Float32Array.from({ length: Math.round(seconds * 48000) }, (_, i) => level * Math.sin(i / 20))) });
+
+test('handlers: a manifest that points outside the workspace writes nothing outside it', async () => {
+  const w = await workspaceTools();
+  try {
+    assert.equal(w.moduleGuidance.length, 2);
+    await mkdir(path.join(w.root, 'game'));
+    for (const file of ['forest-loop.wav', 'forest-intro.wav']) await writeFile(path.join(w.root, 'game', file), wav(0.1, 0.1));
+    const small = { ...manifest, loop: { ...manifest.loop, endFrame: 4800 }, files: manifest.files.filter(f => f.role === 'loop' || f.role === 'intro') };
+    const escaped = 'escaped-' + path.basename(w.root).replace(/[^a-z0-9]/gi, '');
+    const outside = [path.join(w.root, '..', escaped + '-audition.html'), path.join(w.root, '..', '..', escaped + '-audition.html')];
+    await writeFile(path.join(w.root, 'game', 'forest.manifest.json'), JSON.stringify({ ...small, name: '../../' + escaped }));
+    await assert.rejects(w.call('build_audition_page', { folder: 'game' }), /not a plain name/);
+    await writeFile(path.join(w.root, 'game', 'forest.manifest.json'), JSON.stringify({ ...small, loop: { ...small.loop, file: '../../outside.wav' } }));
+    await assert.rejects(w.call('build_audition_page', { folder: 'game' }), /not a plain WAV or OGG name/);
+    assert.ok(outside.every(file => !existsSync(file)), 'nothing written above the workspace');
+    // The honest manifest builds a page inside the folder.
+    await writeFile(path.join(w.root, 'game', 'forest.manifest.json'), JSON.stringify(small));
+    const page = await w.call('build_audition_page', { folder: 'game' });
+    assert.equal(page.page, 'game/forest-audition.html');
+    assert.ok(existsSync(path.join(w.root, 'game', 'forest-audition.html')));
+    await assert.rejects(w.call('build_audition_page', { files: ['../x.wav'] }));
+    await assert.rejects(w.call('build_audition_page', { folder: 'game', spectrogram: '../x.png' }));
+    // A/B with two files of the same name in different folders keeps both paths.
+    await mkdir(path.join(w.root, 'v1')); await mkdir(path.join(w.root, 'v2'));
+    await writeFile(path.join(w.root, 'v1', 'theme.wav'), wav(0.5, 0.1));
+    await writeFile(path.join(w.root, 'v2', 'theme.wav'), wav(0.75, 0.4));
+    const ab = await w.call('build_audition_page', { files: ['v1/theme.wav', 'v2/theme.wav'] });
+    assert.deepEqual(ab.compare.map(file => file.src), ['v1/theme.wav', 'v2/theme.wav']);
+    assert.ok(ab.compare[1].gainDb < -10 && ab.compare[0].gainDb === 0);
+    assert.equal((await w.call('read_feedback', { text: JSON.stringify(feedback) })).noteCount, 3);
+    await assert.rejects(w.call('read_feedback', { file: '../feedback.json' }));
+  } finally { await w.done(); }
+});
+
+test('handlers: parallel remember_taste calls keep every entry with distinct ids', async () => {
+  const w = await workspaceTools();
+  try {
+    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => w.call('remember_taste', { text: `preference ${i}`, area: 'mix' })));
+    assert.deepEqual(results.map(result => result.entry.id).sort(), ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8']);
+    assert.equal((await w.call('get_taste')).count, 8);
+    assert.deepEqual(await readdir(w.root), ['.lmms-taste.json'], 'no temporary or lock files left behind');
+  } finally { await w.done(); }
+});
+
+test('handlers: a damaged taste file reports itself and repair recovers the valid entries', async () => {
+  const w = await workspaceTools();
+  try {
+    const file = path.join(w.root, '.lmms-taste.json');
+    await writeFile(file, JSON.stringify({ version: 1, entries: [{ id: 't1', area: 'lead', text: 'keep me' }, { id: 't2', area: 'lead', text: 42 }] }));
+    await assert.rejects(w.call('get_taste'), /\.lmms-taste\.json entry 2 needs text.*repair: true/);
+    await assert.rejects(w.call('remember_taste', { text: 'new' }), /repair: true/);
+    const repaired = await w.call('remember_taste', { repair: true, text: 'new one', area: 'drums' });
+    assert.equal(repaired.repaired.kept, 1);
+    assert.equal(repaired.repaired.dropped, 1);
+    assert.ok(existsSync(path.join(w.root, repaired.repaired.backup)), 'the damaged file is kept as a backup');
+    assert.equal(repaired.entry.id, 't2');
+    assert.deepEqual((await w.call('get_taste')).preferences, { lead: [{ id: 't1', text: 'keep me' }], drums: [{ id: 't2', text: 'new one' }] });
+    await writeFile(file, '{not json');
+    await assert.rejects(w.call('get_taste'), /\.lmms-taste\.json is not valid JSON/);
+    assert.equal((await w.call('remember_taste', { repair: true })).repaired.dropped, 'all: the file was not valid JSON');
+    assert.equal((await w.call('get_taste')).count, 0);
+  } finally { await w.done(); }
 });

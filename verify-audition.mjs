@@ -4,7 +4,7 @@
 // HTTP server: they must decode every file, log nothing to the console and pass the page's own offline self-test of the
 // intro to loop join. Set LMMS_AUDITION_BROWSER to a browser executable to choose one, or to "none" to skip that part.
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { existsSync, createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { DOMParser } from '@xmldom/xmldom';
-import { decodeWav } from './audio.mjs';
+import { decodeWav, encodeWav, slice } from './audio.mjs';
 
 const workspace = await mkdtemp(path.join(tmpdir(), 'lmms-audition-check-'));
 console.log(workspace);
@@ -155,6 +155,12 @@ try {
   await call('apply_edits', { project: 'song.mmp', output: 'loud.mmp', edits: [{ op: 'set_master', args: { volume: 160 } }] });
   await call('render_mix', { project: 'loud.mmp', output: 'loud.wav' });
   const ab = await call('build_audition_page', { files: ['song.wav', 'loud.wav'], bpm: 120, sections: [{ name: 'All', startBar: 0 }] });
+  // A shorter take in a subfolder with the same file name, to check paths and padding.
+  const songAudio = decodeWav(await readFile(path.join(workspace, 'song.wav')));
+  await mkdir(path.join(workspace, 'take2'));
+  await writeFile(path.join(workspace, 'take2', 'song.wav'), encodeWav(slice(songAudio, 0, 4 * 96000)));
+  const uneven = await call('build_audition_page', { files: ['song.wav', 'take2/song.wav'], bpm: 120, output: 'uneven.html' });
+  assert.deepEqual(uneven.compare.map(file => file.src), ['song.wav', 'take2/song.wav']);
   assert.equal(ab.page, 'song-ab-audition.html');
   const [a, b] = ab.compare;
   assert.ok(b.lufs > a.lufs + 2, `the louder render measures louder (${a.lufs} and ${b.lufs})`);
@@ -247,6 +253,10 @@ try {
       assert.equal(await browser.evaluate("document.querySelector('#notes li .text').textContent"), 'Test note');
       assert.match(await browser.evaluate("document.querySelector('#notes li .when').textContent"), /bar 0\.\d/);
       assert.equal(await browser.open(base + ab.page, loader('ready')), 'yes');
+      assert.deepEqual(browser.problems, [], 'no console output or errors from the A/B page');
+      assert.equal(await browser.open(base + 'uneven.html', loader('ready')), 'yes');
+      const played = JSON.parse(await browser.evaluate(loader('playFrames')));
+      assert.deepEqual(played, { 'song.wav': songAudio.frames, 'take2/song.wav': songAudio.frames }, 'the shorter take is padded to the longer so A/B stays in step');
       assert.deepEqual(browser.problems, [], 'no console output or errors from the A/B page');
       const local = await browser.open('file:///' + pagePath.replaceAll('\\', '/'),
         "document.getElementById('picker').classList.contains('hidden') ? null : document.getElementById('status').textContent");
