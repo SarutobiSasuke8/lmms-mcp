@@ -33,6 +33,22 @@ For an install that follows a fixed GitHub release, run `npx -y https://github.c
 
 ## Export and playback
 
+Use `export_one_shots` to process up to 32 mono or stereo 48 kHz, 16-bit PCM WAVs in one call. Give each source a unique output name and choose a new output directory. The tool trims quiet edges, adds short fades, matches sample peaks and writes mono WAVs and a JSON manifest. The manifest reports duration, trim offset and measured levels. Peak matching leaves each take's dynamics intact.
+
+```json
+{
+  "outputDirectory": "rts-pack",
+  "sounds": [
+    {"input": "ack-source.wav", "name": "unit-acknowledged"},
+    {"input": "shutdown-source.wav", "name": "robot-shutdown"}
+  ],
+  "thresholdDb": -48,
+  "peakDb": -3
+}
+```
+
+For a saved sampler track, use `create_project` with `voice: "sample"`, a workspace WAV as `sample` and the recorded pitch as `rootMidi`. Trigger the sample at the root for unchanged pitch or use other notes to transpose it. The saved project references that WAV by its absolute path. Use LMMS to relink the source if you move the project to a different machine.
+
 Keep the native project as the editable master. MIDI exports instrument patterns and non-overlapping Beat/Bassline clips at a static tempo. Drum steps export as sixteenth-note triggers. Synth patches, effects, audio clips and automation stay in the native project. The default `pitchMode: "written"` preserves the piano-roll notes. Select `"playback"` to apply the instrument base note and master pitch offsets. Plugin transposition and pitch modulation remain in the native project.
 
 Stem export uses LMMS track rendering. It trims or pads each take to the mix length, including tracks with shorter patterns. Effects that depend on several tracks playing together can sound different in solo renders.

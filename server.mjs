@@ -30,7 +30,9 @@ const pattern = z.object({
   bars: z.number().int().min(1).max(64), notes: z.array(note).min(1).max(4096),
 });
 const track = z.object({
-  name: z.string().min(1).max(100), voice: z.enum(['pluck', 'bass', 'pad', 'kick', 'clap', 'hat']),
+  name: z.string().min(1).max(100), voice: z.enum(['pluck', 'bass', 'pad', 'kick', 'clap', 'hat', 'sample']),
+  sample: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.wav$/i).optional(),
+  rootMidi: z.number().int().min(12).max(119).default(69),
   volume: z.number().int().min(0).max(100), pan: z.number().int().min(-100).max(100).default(0),
   patterns: z.array(pattern).min(1).max(64),
 });
@@ -92,7 +94,11 @@ function addPattern(target, part) {
 function addTrack(container, item) {
   const target = add(container, 'track', { muted: 0, solo: 0, type: 0, name: item.name });
   const instrumentTrack = add(target, 'instrumenttrack', { vol: item.volume, pan: item.pan, basenote: 57, fxch: 0 });
-  if (item.voice in kit) {
+  if (item.voice === 'sample') {
+    instrumentTrack.setAttribute('basenote', String(item.rootMidi - 12));
+    add(add(instrumentTrack, 'instrument', { name: 'audiofileprocessor' }), 'audiofileprocessor',
+      { src: path.join(root, item.sample).replaceAll('\\', '/'), amp: 100, sframe: 0, eframe: 1, interp: 1 });
+  } else if (item.voice in kit) {
     add(add(instrumentTrack, 'instrument', { name: 'audiofileprocessor' }), 'audiofileprocessor',
       { src: 'drums/' + kit[item.voice] + '.ogg', amp: 100, sframe: 0, eframe: 1, interp: 1 });
   } else {
@@ -125,6 +131,11 @@ tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 tick
   output: projectName, bpm: z.number().int().min(45).max(240), tracks: z.array(track).min(1).max(24),
 }, async ({ output, bpm, tracks: items }) => {
   if (new Set(items.map(t => t.name)).size !== items.length) throw new Error('Track names must be unique');
+  for (const item of items) {
+    if (item.voice === 'sample' && (!item.sample || !(await lstat(path.join(root, item.sample))).isFile())) {
+      throw new Error('Sample tracks require a regular workspace WAV');
+    }
+  }
   const doc = parse('<?xml version="1.0"?><!DOCTYPE lmms-project><lmms-project version="1.0" creator="LMMS" creatorversion="1.2.2" type="song"/>');
   add(doc.documentElement, 'head', { bpm, mastervol: 86, timesig_numerator: 4, timesig_denominator: 4 });
   const container = add(add(doc.documentElement, 'song'), 'trackcontainer', { type: 'song' });
@@ -370,6 +381,79 @@ function measureWav(wav) {
     peakDbfs: db(peak), rmsDbfs: db(Math.sqrt(sumSquares / (samples.length / 2))),
     fullScaleSamples, boundaryJumpDbfs: db(boundaryJump) };
 }
+const soundName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i);
+tool('export_one_shots', 'Trim edge silence, fade and peak-match source WAVs as mono 48 kHz game sound effects.', {
+  outputDirectory: soundName,
+  sounds: z.array(z.object({
+    input: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.wav$/i), name: soundName,
+  })).min(1).max(32),
+  thresholdDb: z.number().min(-75).max(-20).default(-48),
+  peakDb: z.number().min(-18).max(-1).default(-3),
+}, async ({ outputDirectory, sounds, thresholdDb, peakDb }) => {
+  if (new Set(sounds.map(s => s.name.toLowerCase())).size !== sounds.length) throw new Error('Sound names must be unique');
+  const destination = path.join(root, outputDirectory);
+  await mkdir(destination);
+  try {
+    const files = [];
+    for (const { input, name } of sounds) {
+      const source = path.join(root, input);
+      const info = await lstat(source);
+      if (!info.isFile() || info.size > 32 * 1024 * 1024) throw new Error('Expected a regular workspace WAV up to 32 MiB');
+      const { samples, channels, sampleRate, frameBytes } = readPcm(await readFile(source));
+      if (sampleRate !== 48000 || channels > 2) throw new Error('Source WAVs must be 48 kHz mono or stereo 16-bit PCM');
+      const frames = samples.length / frameBytes;
+      if (frames > sampleRate * 30) throw new Error('Source one-shots must be 30 seconds or shorter');
+      const mono = new Float64Array(frames);
+      const cutoff = 32768 * 10 ** (thresholdDb / 20);
+      let start = frames;
+      let end = 0;
+      for (let i = 0; i < frames; i++) {
+        mono[i] = samples.readInt16LE(i * frameBytes);
+        if (channels === 2) mono[i] = (mono[i] + samples.readInt16LE(i * frameBytes + 2)) / 2;
+        if (Math.abs(mono[i]) >= cutoff) {
+          start = Math.min(start, i);
+          end = i + 1;
+        }
+      }
+      if (!end) throw new Error(input + ' is silent at the trim threshold');
+      start = Math.max(0, start - 240);
+      end = Math.min(frames, end + 480);
+      const take = mono.subarray(start, end);
+      const fade = Math.max(1, Math.min(240, Math.floor(take.length / 4)));
+      let peak = 0;
+      for (let i = 0; i < take.length; i++) {
+        take[i] *= Math.min(1, i / fade, (take.length - 1 - i) / fade);
+        peak = Math.max(peak, Math.abs(take[i]));
+      }
+      if (!peak) throw new Error(input + ' has no signal after fades');
+      const gain = 32767 * 10 ** (peakDb / 20) / peak;
+      const wav = Buffer.alloc(44 + take.length * 2);
+      wav.write('RIFF', 0);
+      wav.writeUInt32LE(wav.length - 8, 4);
+      wav.write('WAVEfmt ', 8);
+      wav.writeUInt32LE(16, 16);
+      wav.writeUInt16LE(1, 20);
+      wav.writeUInt16LE(1, 22);
+      wav.writeUInt32LE(sampleRate, 24);
+      wav.writeUInt32LE(sampleRate * 2, 28);
+      wav.writeUInt16LE(2, 32);
+      wav.writeUInt16LE(16, 34);
+      wav.write('data', 36);
+      wav.writeUInt32LE(take.length * 2, 40);
+      for (let i = 0; i < take.length; i++) wav.writeInt16LE(Math.round(take[i] * gain), 44 + i * 2);
+      const file = name + '.wav';
+      await writeFile(path.join(destination, file), wav, { flag: 'wx' });
+      files.push({ file, source: input, trimStartSeconds: start / sampleRate, ...measureWav(wav) });
+    }
+    const manifest = { sampleRate: 48000, channels: 1, peakTargetDbfs: peakDb, files };
+    await writeFile(path.join(destination, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+    return manifest;
+  } catch (error) {
+    // The directory was created exclusively by this call.
+    await rm(destination, { recursive: true });
+    throw error;
+  }
+});
 tool('edit_clip', 'Move, duplicate, rename or remove an instrument pattern in a project copy. Positions are absolute LMMS ticks.', {
   project: projectName, output: projectName, trackName: z.string(),
   tick: z.number().int().nonnegative(),
