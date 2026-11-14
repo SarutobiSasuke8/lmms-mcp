@@ -2,7 +2,7 @@
 
 ## How a version is cut today
 
-Versions are cut by hand on GitHub. Nothing is published to npm.
+Versions are cut by hand on GitHub. From 0.8.1, pushing a version tag also publishes `@sarutobi-sasuke/lmms-mcp` to npm through `.github/workflows/release.yml`, using npm trusted publishing with provenance. No npm token is stored in GitHub.
 
 1. The version number is changed in `package.json`, `package-lock.json` and the `McpServer` constructor near the top of `server.mjs`.
 2. The pull request that carries the change is merged into `main`.
@@ -27,7 +27,7 @@ To release:
 - [ ] Tag the merge commit on `main`, not a feature branch: `git tag -a v0.8.0 -m "LMMS MCP 0.8.0"` and `git push origin v0.8.0`.
 - [ ] Create the GitHub release from the tag. Paste the version's section of `CHANGELOG.md` as the notes and keep the "Compatibility" heading.
 - [ ] Keep it marked as a pre-release until the tool schemas are considered stable (1.0.0).
-- [ ] Do not publish to npm until the package name, the `bin` entry and the install instructions have been tried from a clean machine.
+- [ ] Pushing the tag starts the Release workflow, which runs the checks again, confirms the tag matches `package.json` and publishes to npm. Watch it finish, then check `npm view @sarutobi-sasuke/lmms-mcp version`.
 
 ## Proposal: a change log for tool schema changes
 
