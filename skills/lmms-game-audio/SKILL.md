@@ -1,12 +1,24 @@
 ---
 name: lmms-game-audio
-description: Compose, audition, revise, and export editable LMMS music loops and game audio using LMMS MCP. Use for synth patches, arpeggios, drum grooves, stems, MIDI and one-shot packs.
+description: Compose, mix, check and export game music and audio with LMMS MCP. Use for loops, adaptive layers, intros, stingers, synth and drum parts, stems, MIDI and one-shot packs.
 ---
 
 # LMMS game audio
 
-- Call `search_sounds` for an audible role such as dark arp, sub bass, or metallic bell. Fathom results carry a patch ID. Stock LMMS results carry a preset path. Audition results with `preview_sound` and share WAV paths if the session has audio playback.
-- Build a saved project with separate lanes for drums, bass, harmony and hook. A beat is 48 ticks, a 4/4 bar is 192 ticks, and bar numbers start at zero. Factory drums trigger at MIDI 69. Use rests, note lengths and varying accents to shape the rhythm.
-- Use a catalogue patch ID with `render_fathom_track` to render the edited notes through the same synth. Cutoff starts at tick zero. Use `apply_preset` for a native preset. Fathom leaves the source notes editable and plays a bounced clip, so bounce again after changes. If the optional engine is absent, pick a verified native sound.
-- Use `render_mix` for complete loops. Check duration, full-scale samples and the loop boundary. Deliver the MMP or MMPZ and any referenced WAVs for editable handoff. Use `render_stems` for aligned layers and `export_midi` for piano-roll material.
-- Use `export_one_shots` for short mono game assets with consistent peak levels and a manifest.
+Work in this order. You cannot hear the result, so measure at every stage and say so when you report.
+
+1. **Plan the form.** Pick tempo, key and a bar count that gives the length you need (bars x 240 / BPM seconds). Name the sections and their bars.
+2. **Choose sounds.** `search_sounds` with a `role` (bass, lead, pad, pluck, bell, drum) and words such as `bright` or `warm`. `list_samples` for stock drums and instruments. Audition with `preview_sound` and read the reported level and pitch.
+3. **Write parts.** `create_project` with one lane each for drums, bass, harmony and melody. Use `steps` grids for drums, `chords` for harmony and bass, `melody` lines for tunes, and raw `notes` only where you need exact control. Give one-shot samples a note `length` that covers the sample (a crash needs about 150 ticks at 120 BPM). Presets are concert-tuned by default, so write the pitch you want to hear. Set `lengthBars` for an exact loop.
+4. **Arrange.** `copy_bars` to repeat sections, `add_pattern` and `add_track` to extend, `replace_pattern` to vary. Thin the first and last bars so the loop point breathes.
+5. **Mix in passes with `apply_edits`.** One call per pass: volumes and pans, then effects (`delay` with a note-value `time`, `reverb`, a `limiter` on `Master`), then automation. Keep effects on tracks, not Master, if you will export layers.
+6. **Measure.** `render_stems`, then `analyze_audio` on stems and the mix with `sections` in bars. Balance from the numbers: kick and bass carry the low bands, the lead should sit a few dB above the pads, and no section should be silent or clipped. Act on the warnings. Ask for a `spectrogram` when you need to see the arrangement.
+7. **Master and deliver.** `render_mix` with `tail: "wrap"` and `targetLufs: -16` for a single loop. `export_game_audio` for intro, loop, layers, stingers, OGG and the manifest. `export_one_shots` for sound effects. Hand over the MMP or MMPZ as the editable master, plus `export_midi` if the notes are wanted elsewhere.
+
+Rules of thumb:
+
+- A beat is 48 ticks and a 4/4 bar is 192. Bars start at zero. Stock drums play at original pitch on MIDI 69.
+- Leave headroom before mastering: lower `set_master` until the raw mix peaks below -1 dBFS with no clipped samples.
+- Stereo correlation under 0.2 in a section means it will thin out in mono. Narrow or lower the widest part.
+- Report loudness, true peak, clipped samples and the loop seam with every delivery, and state that the result was checked by measurement.
+- Fathom patches need `LMMS_FATHOM_WORKLET`. If `search_sounds` shows none, use native sounds.

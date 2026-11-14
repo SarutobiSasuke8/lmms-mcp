@@ -39,25 +39,100 @@ export const fathomPatches = Object.fromEntries(entries.map(([id, name, tags, ro
   id, { name, tags, root, phrase, patch: { ...base, ...overrides, filter: { ...base.filter, ...overrides.filter } } },
 ]));
 
-export function searchSounds({ query, engine, limit }, native) {
+const roleWords = [
+  ['drum', /kick|snare|hihat|hat|clap|drum|shaker|rim|tom|cymbal|perc/], ['bass', /bass|sub|reese|303|acid/],
+  ['bell', /bell|xylo|vibra|glock|chime|marimba|mallet|ping|kalimba/], ['organ', /organ|harmonium|accord/],
+  ['keys', /piano|rhodes|epiano|e-piano|keys|harpsi|clav|wurli/], ['brass', /brass|trumpet|horn|sax|trombone|tuba/],
+  ['strings', /string|violin|cello|viola|orchestra/], ['pad', /pad|choir|voice|atmo|ambient|dream|drone|sweep|halo/],
+  ['pluck', /pluck|arp|harp|guitar|koto|banjo|sitar|pizz/], ['lead', /lead|saw|square|sync|whistle|oboe|flute|clarinet|reed|wind|synth/],
+  ['fx', /fx|noise|effect|bubble|laser|zap|alien|space|weapon|engine/],
+];
+// Role and search words taken from a preset's folder and file name.
+export function nameTags(group, file) {
+  const name = file.replace(/\.(xpf|xiz)$/i, '').replace(/^\d+-/, '');
+  const text = (group + ' ' + file).toLowerCase();
+  const nameRole = roleWords.find(([, pattern]) => pattern.test(text))?.[0] ?? null;
+  return { name, group, nameRole };
+}
+// Describe a rendered test note: one written note held for holdSeconds from time zero.
+export function measureInstrument(audio, { writtenMidi, holdSeconds }, dsp) {
+  const { sampleRate, frames } = audio;
+  const left = audio.channels[0], right = audio.channels[1] ?? left;
+  const mono = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) mono[i] = (left[i] + right[i]) / 2;
+  const window = Math.round(sampleRate * 0.01);
+  const envelope = [];
+  for (let start = 0; start + window <= frames; start += window) {
+    let sum = 0;
+    for (let i = start; i < start + window; i++) sum += mono[i] * mono[i];
+    envelope.push(Math.sqrt(sum / window));
+  }
+  const top = Math.max(...envelope);
+  const peakDbfs = dsp.db(dsp.samplePeak(audio));
+  if (!(top > 1e-5)) return { silent: true, pitched: false, pitchOffset: 0, peakDbfs: null, role: 'fx', tags: ['silent'] };
+  const hold = Math.round(holdSeconds * 100);
+  const attackMs = envelope.findIndex(v => v >= top * 0.7) * 10;
+  const lateLevel = Math.max(...envelope.slice(Math.max(0, hold - 15), hold - 3));
+  const sustainDb = Number((20 * Math.log10(Math.max(lateLevel, 1e-6) / top)).toFixed(1));
+  let releaseMs = 0;
+  for (let i = hold; i < envelope.length && envelope[i] > top * 0.01; i++) releaseMs += 10;
+  const first = dsp.detectPitch(mono, sampleRate, Math.round(sampleRate * 0.12), Math.round(sampleRate * 0.25));
+  const second = dsp.detectPitch(mono, sampleRate, Math.round(sampleRate * 0.5), Math.round(sampleRate * 0.25));
+  const steady = first && (second ? Math.abs(first.midi - second.midi) < 0.6 : first.confidence > 0.85);
+  const offset = steady ? first.midi - writtenMidi : 0;
+  const pitched = Boolean(steady) && Math.abs(offset - Math.round(offset)) < 0.35;
+  const { centroidHz } = dsp.spectrum(audio, 0, Math.min(frames, Math.round(holdSeconds * sampleRate)));
+  let lr = 0, ll = 0, rr = 0;
+  for (let i = 0; i < frames; i++) { lr += left[i] * right[i]; ll += left[i] * left[i]; rr += right[i] * right[i]; }
+  const correlation = ll > 0 && rr > 0 ? lr / Math.sqrt(ll * rr) : 1;
+  const pitchOffset = pitched ? Math.round(offset) : 0;
+  return describeSound({ pitched, pitchOffset, peakDbfs, attackMs, sustainDb, releaseMs, centroidHz, stereoCorrelation: Number(correlation.toFixed(2)) });
+}
+// Tags and a likely role from the measured numbers alone.
+export function describeSound(facts) {
+  const { pitched, pitchOffset, peakDbfs, attackMs, sustainDb, releaseMs, centroidHz, stereoCorrelation } = facts;
+  const tags = [sustainDb > -6 ? 'sustained' : sustainDb < -20 ? 'percussive' : 'decaying',
+    centroidHz > 1800 ? 'bright' : centroidHz < 600 ? 'dark' : 'warm'];
+  if (attackMs > 60) tags.push('slow-attack');
+  if (releaseMs > 400) tags.push('long-release');
+  if (stereoCorrelation < 0.6) tags.push('wide');
+  if (peakDbfs < -30) tags.push('quiet');
+  if (peakDbfs > -6) tags.push('loud');
+  const role = !pitched ? (tags.includes('percussive') ? 'drum' : 'fx') : pitchOffset <= -24 ? 'bass' :
+    attackMs > 60 && sustainDb > -12 ? 'pad' : tags.includes('percussive') ? (centroidHz > 1800 ? 'bell' : 'pluck') : 'lead';
+  return { pitched, pitchOffset, peakDbfs, attackMs, sustainDb, releaseMs, centroidHz, stereoCorrelation, role, tags };
+}
+
+export function searchSounds({ query, engine, role, limit, fathomAvailable }, native, zyn = [], facts = {}) {
   const tokens = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
   const sounds = [];
-  if (engine !== 'lmms') {
+  // Fathom patches are listed only when the bridge can render them, or when asked for by engine.
+  if (engine === 'fathom' || (!engine && fathomAvailable)) {
     for (const [patchId, { name, tags, patch }] of Object.entries(fathomPatches)) {
-      sounds.push({ name, tags, engine: 'fathom', model: patch.model, patchId, preview: 'preview_sound' });
+      const guess = roleWords.find(([, pattern]) => tags.some(tag => pattern.test(tag)))?.[0] ?? 'lead';
+      sounds.push({ name, tags, role: guess, engine: 'fathom', model: patch.model, patchId, preview: 'preview_sound' });
     }
   }
-  if (engine !== 'fathom') {
-    for (const preset of native) {
-      const [group, file] = preset.split('/');
-      sounds.push({ name: file.replace(/\.xpf$/i, ''), tags: [group], engine: 'lmms', preset, preview: 'preview_sound' });
+  for (const [list, label] of [[native, 'lmms'], [zyn, 'zyn']]) {
+    if (engine && engine !== label) continue;
+    for (const preset of list) {
+      const [group, ...rest] = preset.split('/');
+      const fact = facts[preset];
+      const named = nameTags(label === 'zyn' ? rest[0] : group, rest.at(-1));
+      const sound = { name: named.name, tags: [label === 'zyn' ? rest[0] : group, ...(fact?.tags ?? [])],
+        role: named.nameRole ?? fact?.role ?? null, engine: label, preset, preview: 'preview_sound' };
+      if (fact && !fact.silent) {
+        sound.measured = { peakDbfsAtVolume60: fact.peakDbfs, presetPitchOffsetSemitones: fact.pitchOffset,
+          pitched: fact.pitched, attackMs: fact.attackMs, sustainDb: fact.sustainDb, centroidHz: fact.centroidHz };
+      }
+      sounds.push(sound);
     }
   }
-  const ranked = sounds.map(sound => {
+  const ranked = sounds.filter(sound => !role || sound.role === role).map(sound => {
     const name = sound.name.toLowerCase();
-    const searchable = [name, sound.engine, sound.model, ...sound.tags].join(' ').toLowerCase();
+    const searchable = [name, sound.engine, sound.model, sound.role, ...sound.tags].join(' ').toLowerCase();
     const score = tokens.every(token => searchable.includes(token))
-      ? tokens.reduce((sum, token) => sum + (name.includes(token) ? 2 : 1), 0) : -1;
+      ? tokens.reduce((sum, token) => sum + (name.includes(token) ? 2 : 1), 0) + (sound.measured ? 0.5 : 0) : -1;
     return { sound, score };
   }).filter(({ score }) => score >= 0).sort((a, b) => b.score - a.score);
   return { total: ranked.length, sounds: ranked.slice(0, limit).map(({ sound }) => sound) };

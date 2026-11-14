@@ -4,42 +4,79 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { z } from 'zod';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { deflateSync, inflateSync } from 'node:zlib';
+import { deflateSync, gunzipSync, inflateSync } from 'node:zlib';
 import midiPackage from '@tonejs/midi';
 import { createConnection } from 'node:net';
 import { renderFathom } from './fathom.mjs';
-import { fathomPatches, searchSounds } from './catalogue.mjs';
+import { fathomPatches, searchSounds, measureInstrument } from './catalogue.mjs';
+import * as dsp from './audio.mjs';
+import { expandPattern, parseChord, voiceChord, bassNote, chordQualities } from './music.mjs';
+import { effectTypes, resolveParams, describeEffects } from './effects.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(process.env.LMMS_WORKSPACE ?? process.cwd());
 const lmms = process.env.LMMS_EXECUTABLE ??
   (process.platform === 'win32' ? 'C:/Program Files/LMMS/lmms.exe' : 'lmms');
-const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(path.dirname(lmms), 'data', 'presets'));
+const dataDirectory = path.join(path.dirname(lmms), 'data');
+const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(dataDirectory, 'presets'));
+const samplesDirectory = path.resolve(process.env.LMMS_SAMPLES ?? path.join(dataDirectory, 'samples'));
 const pluginDirectory = path.resolve(process.env.LMMS_PLUGINS ?? path.join(path.dirname(lmms), 'plugins'));
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.6.0' });
+const ffmpeg = process.env.LMMS_FFMPEG ?? 'ffmpeg';
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.7.0' });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
 const wavName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.wav$/i);
 const timelineTick = z.number().int().min(0).max(2147483647);
+const audioOut = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.(wav|ogg)$/i);
+// A workspace WAV, optionally one folder down (for example a kit made by export_one_shots).
+const workspaceWav = z.string().regex(/^(?:[a-z0-9][a-z0-9 _-]{0,79}\/)?[a-z0-9][a-z0-9 _-]{0,99}\.wav$/i);
+const factorySample = z.string().regex(/^[a-z0-9][\w -]{0,60}(?:\/[a-z0-9!][\w .()!-]{0,80}){1,2}\.(ogg|wav|flac)$/i);
+const folderName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i);
 const patchId = z.enum(Object.keys(fathomPatches));
+const anchorName = 'Song length';
 const note = z.object({
   tick: z.number().int().min(0), length: z.number().int().min(1),
-  midi: z.number().int().min(12).max(119), velocity: z.number().int().min(1).max(100),
+  midi: z.number().int().min(12).max(119), velocity: z.number().int().min(1).max(200),
 });
+const grid = { stepsPerBar: z.number().int().min(1).max(192).optional(), swing: z.number().min(0).max(0.75).optional(),
+  humanize: z.number().min(0).max(30).optional(), seed: z.number().int().optional() };
+const pitchToken = z.union([z.number().int().min(12).max(119), z.string().max(6)]);
 const pattern = z.object({
-  name: z.string().min(1).max(100), bar: z.number().int().min(0).max(255),
-  bars: z.number().int().min(1).max(64), notes: z.array(note).min(1).max(4096),
+  name: z.string().min(1).max(100), bar: z.number().int().min(0).max(999),
+  bars: z.number().int().min(1).max(64),
+  notes: z.array(note).min(1).max(4096).optional()
+    .describe('Raw notes. tick and length are in ticks from the pattern start (48 per beat).'),
+  steps: z.object({ grid: z.string().min(1).max(1024), midi: pitchToken.optional(), length: z.number().int().min(1).max(768).optional(), ...grid }).optional()
+    .describe('Drum grid, tiled to fill the pattern: X accent, x hit, o soft, g ghost, - rest. Example "x---o---x-x-o---". Default 16 steps per bar, 48-tick notes at MIDI 69.'),
+  melody: z.object({ line: z.string().min(1).max(8000), velocity: z.number().int().min(1).max(200).optional(),
+    gate: z.number().min(0.05).max(1).optional(), repeat: z.boolean().optional(), ...grid }).optional()
+    .describe('Melody line of NOTE:steps[:velocity] tokens, r:steps for rests, [D4,F4,A4]:8 for chords, | ignored. Example "D5:3 F5:3 A5:6 G5:2 F5:2". Repeats to fill the pattern.'),
+  chords: z.object({ progression: z.union([z.string().min(1).max(2000), z.array(z.string()).min(1).max(256)]),
+    style: z.enum(['block', 'pulse', 'arp', 'bass']).optional(), figure: z.enum(['whole', 'eighths', 'octaves', 'syncopated']).optional(),
+    order: z.enum(['up', 'down', 'updown', 'alberti', 'broken']).optional(), octave: z.number().int().min(0).max(7).optional(),
+    octaves: z.union([z.literal(1), z.literal(2)]).optional(), voicing: z.enum(['close', 'open', 'spread']).optional(),
+    voiceLead: z.boolean().optional(), rate: z.number().min(0.25).max(64).optional(), barsPerChord: z.number().min(0.25).max(16).optional(),
+    gate: z.number().min(0.05).max(1).optional(), velocity: z.number().int().min(1).max(200).optional(), ...grid }).optional()
+    .describe('Chord progression such as "Dm Bb F C" (one bar each; "Dm:2" lasts two bars), looped to fill the pattern. style: block, pulse, arp (order, rate in steps) or bass (figure).'),
+  transpose: z.number().int().min(-48).max(48).optional(),
 });
+const presetFile = z.string().regex(/^(?:[\w -]+\/[\w .()!-]+\.xpf|ZynAddSubFX\/[\w -]+\/[\w .()!',&+-]+\.xiz)$/i);
+const volume = z.number().min(0).max(200);
 const track = z.object({
-  name: z.string().min(1).max(100), voice: z.enum(['pluck', 'bass', 'pad', 'kick', 'clap', 'hat', 'sample']),
-  sample: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.wav$/i).optional(),
+  name: z.string().min(1).max(100),
+  voice: z.enum(['pluck', 'bass', 'pad', 'kick', 'clap', 'hat', 'sample', 'preset'])
+    .describe('pluck, bass and pad are built-in synths; kick, clap and hat are stock one-shots; sample plays a workspace WAV or a stock LMMS sample; preset loads a factory preset.'),
+  sample: workspaceWav.optional(), factorySample: factorySample.optional().describe('Stock LMMS sample such as "drums/snare01.ogg". See list_samples.'),
+  preset: presetFile.optional(),
   rootMidi: z.number().int().min(12).max(119).default(69),
-  volume: z.number().int().min(0).max(100), pan: z.number().int().min(-100).max(100).default(0),
+  volume, pan: z.number().int().min(-100).max(100).default(0),
   patterns: z.array(pattern).min(1).max(64),
 });
 const kit = { kick: 'kick_soft01', clap: 'clap01', hat: 'hihat_closed01' };
@@ -56,6 +93,7 @@ function add(parent, tag, attrs = {}) {
   return node;
 }
 const children = (node, tag) => Array.from(node?.childNodes ?? []).filter(child => child.nodeName === tag);
+const elements = node => Array.from(node?.childNodes ?? []).filter(child => child.nodeType === 1);
 const xml = new XMLSerializer();
 function parse(source) {
   const doc = new DOMParser().parseFromString(source, 'application/xml');
@@ -74,7 +112,7 @@ async function load(project) {
   if (source.length !== file.readUInt32BE(0)) throw new Error('Compressed project size mismatch');
   return parse(source.toString('utf8'));
 }
-async function save(doc, output) {
+async function save(doc, output, overwrite = false) {
   const source = Buffer.from(xml.serializeToString(doc), 'utf8');
   if (source.length > maxProjectBytes) throw new Error('Project exceeds 32 MiB');
   let file = source;
@@ -83,32 +121,83 @@ async function save(doc, output) {
     prefix.writeUInt32BE(source.length);
     file = Buffer.concat([prefix, deflateSync(source)]);
   }
-  await writeFile(path.join(root, output), file, { flag: 'wx' });
+  await writeFile(path.join(root, output), file, { flag: overwrite ? 'w' : 'wx' });
   return { project: output };
 }
 function tracks(doc) {
   const song = children(doc.documentElement, 'song')[0];
   return children(children(song, 'trackcontainer')[0], 'track');
 }
+const container = doc => children(children(doc.documentElement, 'song')[0], 'trackcontainer')[0];
+const isAnchor = t => t.getAttribute('type') === '2' && t.getAttribute('name') === anchorName;
+// Automation tracks and the length anchor carry no audio of their own; they stay active in every isolated render.
+const isControl = t => t.getAttribute('type') === '5' || isAnchor(t);
+
+function songInfo(doc) {
+  const [head] = children(doc.documentElement, 'head');
+  const bpm = Number(head?.getAttribute('bpm') || 140);
+  const meter = [Number(head?.getAttribute('timesig_numerator') || 4), Number(head?.getAttribute('timesig_denominator') || 4)];
+  const ticksPerBar = 192 * meter[0] / meter[1];
+  let end = 0;
+  for (const t of tracks(doc)) {
+    if (t.getAttribute('muted') === '1') continue;
+    for (const clip of children(t, 'pattern')) {
+      let last = 0;
+      for (const n of children(clip, 'note')) last = Math.max(last, Number(n.getAttribute('pos')) + Math.max(0, Number(n.getAttribute('len'))));
+      end = Math.max(end, Number(clip.getAttribute('pos')) + Math.max(1, Math.ceil(last / ticksPerBar)) * ticksPerBar);
+    }
+    for (const tag of ['sampletco', 'bbtco']) {
+      for (const clip of children(t, tag)) end = Math.max(end, Number(clip.getAttribute('pos')) + Number(clip.getAttribute('len')));
+    }
+    for (const clip of children(t, 'automationpattern')) {
+      const last = Math.max(0, ...children(clip, 'time').map(point => Number(point.getAttribute('pos'))));
+      end = Math.max(end, Number(clip.getAttribute('pos')) + (Math.floor(last / ticksPerBar) + 1) * ticksPerBar);
+    }
+  }
+  const staticTempo = Boolean(head) && !children(head, 'bpm').length && Number.isFinite(bpm) && bpm > 0;
+  return { head, bpm, meter, ticksPerBar, staticTempo, lengthTicks: end, lengthBars: end / ticksPerBar,
+    lengthSeconds: end * 60 / (bpm * 48), secondsPerBar: ticksPerBar * 60 / (bpm * 48) };
+}
+// LMMS sizes a piano-roll clip from its last note, so empty bars at the end of a song vanish.
+// An empty sample clip pins the song to the intended length.
+function setAnchor(doc, bars) {
+  for (const t of tracks(doc).filter(isAnchor)) t.parentNode.removeChild(t);
+  if (bars === null) return;
+  const { ticksPerBar } = songInfo(doc);
+  const target = add(container(doc), 'track', { type: 2, name: anchorName, muted: 0, solo: 0 });
+  add(target, 'sampletrack', { vol: 0, pan: 0 });
+  add(target, 'sampletco', { pos: 0, len: Math.round(bars * ticksPerBar), muted: 0, src: '' });
+}
 function addPattern(target, part) {
   const ticks = part.bars * 192;
-  if (part.notes.some(n => n.tick + n.length > ticks)) throw new Error('Note extends beyond pattern');
+  const notes = expandPattern(part);
+  if (notes.some(n => n.tick + n.length > ticks)) throw new Error('Note extends beyond pattern');
   const clip = add(target, 'pattern', { name: part.name, pos: part.bar * 192, len: ticks, type: 1, steps: 16, muted: 0 });
-  for (const n of part.notes) add(clip, 'note', { key: n.midi - 12, pos: n.tick, len: n.length, vol: n.velocity, pan: 0 });
+  for (const n of notes) add(clip, 'note', { key: n.midi - 12, pos: n.tick, len: n.length, vol: n.velocity, pan: 0 });
   return clip;
 }
-function addTrack(container, item) {
-  const target = add(container, 'track', { muted: 0, solo: 0, type: 0, name: item.name });
+async function checkTrack(item) {
+  if (item.voice === 'sample') {
+    if (Boolean(item.sample) === Boolean(item.factorySample)) throw new Error(`Track "${item.name}": sample tracks need exactly one of sample or factorySample`);
+    const file = item.sample ? path.join(root, item.sample) : path.join(samplesDirectory, item.factorySample);
+    if (!(await lstat(file).catch(() => null))?.isFile()) {
+      throw new Error(`Track "${item.name}": ${item.sample ? 'workspace WAV' : 'stock sample'} "${item.sample ?? item.factorySample}" was not found`);
+    }
+  } else if (item.sample || item.factorySample) throw new Error(`Track "${item.name}": sample and factorySample need voice "sample"`);
+  if ((item.voice === 'preset') !== Boolean(item.preset)) throw new Error(`Track "${item.name}": voice "preset" and the preset field go together`);
+}
+function addTrack(parent, item) {
+  const target = add(parent, 'track', { muted: 0, solo: 0, type: 0, name: item.name });
   const instrumentTrack = add(target, 'instrumenttrack', { vol: item.volume, pan: item.pan, basenote: 57, fxch: 0 });
   if (item.voice === 'sample') {
     instrumentTrack.setAttribute('basenote', String(item.rootMidi - 12));
     add(add(instrumentTrack, 'instrument', { name: 'audiofileprocessor' }), 'audiofileprocessor',
-      { src: path.join(root, item.sample).replaceAll('\\', '/'), amp: 100, sframe: 0, eframe: 1, interp: 1 });
+      { src: item.sample ? path.join(root, item.sample).replaceAll('\\', '/') : item.factorySample, amp: 100, sframe: 0, eframe: 1, interp: 1 });
   } else if (item.voice in kit) {
     add(add(instrumentTrack, 'instrument', { name: 'audiofileprocessor' }), 'audiofileprocessor',
       { src: 'drums/' + kit[item.voice] + '.ogg', amp: 100, sframe: 0, eframe: 1, interp: 1 });
   } else {
-    const tone = tones[item.voice];
+    const tone = tones[item.voice] ?? tones.pluck;
     const oscillator = { modalgo1: 2, modalgo2: 2 };
     for (let i = 0; i < 3; i++) {
       oscillator['wavetype' + i] = tone.waves[i];
@@ -123,43 +212,70 @@ function addTrack(container, item) {
       dec: tone.decay, sustain: tone.sustain, rel: tone.release });
   }
   for (const part of item.patterns) addPattern(target, part);
+  return instrumentTrack;
 }
+const imagesKey = Symbol('images');
+const explain = error => error?.issues ? error.issues.map(issue => [issue.path.join('.'), issue.message].filter(Boolean).join(': ')).join('; ') : error.message;
 function tool(name, description, inputSchema, handler) {
   server.registerTool(name, { description, inputSchema }, async args => {
     try {
-      return { content: [{ type: 'text', text: JSON.stringify(await handler(args)) }] };
+      const result = await handler(args);
+      const content = [{ type: 'text', text: JSON.stringify(result) }];
+      for (const png of result?.[imagesKey] ?? []) content.push({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
+      return { content };
     } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: error.message }] };
+      return { isError: true, content: [{ type: 'text', text: explain(error) }] };
     }
   });
+}
+// An edit is a change to a loaded project. Each one is a tool of its own and a step for apply_edits.
+const edits = {};
+function edit(name, description, schema, apply) {
+  edits[name] = { schema: z.object(schema), apply, description };
+  tool(name, description + ' Writes a new project copy.', { project: projectName, output: projectName, ...schema },
+    async ({ project, output, ...args }) => {
+      const doc = await load(project);
+      const extra = await apply(doc, args);
+      return { ...(await save(doc, output)), ...extra };
+    });
 }
 function createSong(bpm, items, mastervol = 86) {
   const doc = parse('<?xml version="1.0"?><!DOCTYPE lmms-project><lmms-project version="1.0" creator="LMMS" creatorversion="1.2.2" type="song"/>');
   add(doc.documentElement, 'head', { bpm, mastervol, timesig_numerator: 4, timesig_denominator: 4 });
-  const container = add(add(doc.documentElement, 'song'), 'trackcontainer', { type: 'song' });
-  for (const item of items) addTrack(container, item);
+  const parent = add(add(doc.documentElement, 'song'), 'trackcontainer', { type: 'song' });
+  for (const item of items) addTrack(parent, item);
   return doc;
 }
-tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 ticks, one beat is 48. Drum notes use MIDI 69 at original pitch.', {
-  output: projectName, bpm: z.number().int().min(45).max(240), tracks: z.array(track).min(1).max(24),
-}, async ({ output, bpm, tracks: items }) => {
+const declaredBars = items => Math.max(...items.flatMap(item => item.patterns.map(part => part.bar + part.bars)));
+tool('create_project', 'Create an editable 4/4 LMMS project. One bar is 192 ticks, one beat is 48. Each pattern takes raw notes, a drum step grid, a melody line or a chord progression. Stock drum notes play at original pitch on MIDI 69; give one-shots a note length that covers the sample. The song is pinned to lengthBars (default: the last declared pattern bar) even when its final bars are empty.', {
+  output: projectName, bpm: z.number().min(45).max(240), tracks: z.array(track).min(1).max(48),
+  lengthBars: z.number().int().min(1).max(1000).optional(), masterVolume: volume.default(86),
+  tuning: z.enum(['concert', 'preset']).default('concert').describe('How preset voices are tuned; see apply_preset.'),
+}, async ({ output, bpm, tracks: items, lengthBars, masterVolume, tuning }) => {
   if (new Set(items.map(t => t.name)).size !== items.length) throw new Error('Track names must be unique');
-  for (const item of items) {
-    if (item.voice === 'sample' && (!item.sample || !(await lstat(path.join(root, item.sample))).isFile())) {
-      throw new Error('Sample tracks require a regular workspace WAV');
-    }
+  if (items.some(item => item.name === anchorName)) throw new Error(`"${anchorName}" is a reserved track name`);
+  for (const item of items) await checkTrack(item);
+  const doc = createSong(bpm, items, masterVolume);
+  const loaded = {};
+  for (const item of items.filter(item => item.preset)) {
+    loaded[item.name] = await loadPreset(doc, instrumentOf(doc, item.name), item.preset, { tuning });
   }
-  return save(createSong(bpm, items), output);
+  const natural = songInfo(doc).lengthBars, wanted = lengthBars ?? declaredBars(items);
+  if (wanted < natural) throw new Error(`lengthBars is ${wanted} but the notes run for ${natural} bars`);
+  if (wanted > natural) setAnchor(doc, wanted);
+  const info = songInfo(doc);
+  return { ...(await save(doc, output)), lengthBars: info.lengthBars, lengthSeconds: Number(info.lengthSeconds.toFixed(4)),
+    lengthPinned: wanted > natural, ...(Object.keys(loaded).length ? { presets: loaded } : {}) };
 });
 tool('inspect_project', 'Read saved instrument tracks, pattern locations and note counts.', { project: projectName },
-  async ({ project }) => tracks(await load(project)).map(t => ({
+  async ({ project }) => tracks(await load(project)).filter(t => !isAnchor(t)).map(t => ({
     name: t.getAttribute('name'), patterns: children(t, 'pattern').map(p => ({
       name: p.getAttribute('name'), tick: Number(p.getAttribute('pos')),
       length: Number(p.getAttribute('len')), notes: children(p, 'note').length,
     })),
   })));
 tool('read_pattern', 'Read the notes in a saved instrument pattern. Bar numbers start at zero.', {
-  project: projectName, trackName: z.string(), bar: z.number().int().min(0).max(255),
+  project: projectName, trackName: z.string(), bar: z.number().int().min(0).max(999),
 }, async ({ project, trackName, bar }) => {
   const [, clip] = findPattern(await load(project), trackName, bar);
   return {
@@ -260,273 +376,232 @@ function findPattern(doc, trackName, bar) {
   if (clips.length !== 1) throw new Error('Expected one pattern at the specified bar');
   return [target, clips[0]];
 }
-tool('replace_pattern', 'Write an independent project copy with one arrangement pattern replaced. Identify the existing pattern by track and bar.', {
-  project: projectName, output: projectName, trackName: z.string(), pattern,
-}, async ({ project, output, trackName, pattern: part }) => {
-  const doc = await load(project);
+function instrumentOf(doc, name) {
+  const matching = tracks(doc).filter(t => t.getAttribute('name') === name && t.getAttribute('type') === '0');
+  const instrument = matching.length === 1 && children(matching[0], 'instrumenttrack')[0];
+  if (!instrument) {
+    const names = tracks(doc).filter(t => t.getAttribute('type') === '0').map(t => t.getAttribute('name'));
+    throw new Error(`Expected one instrument track named "${name}". Instrument tracks: ${names.join(', ')}`);
+  }
+  return instrument;
+}
+edit('replace_pattern', 'Replace one arrangement pattern, identified by track and bar.', {
+  trackName: z.string(), pattern,
+}, (doc, { trackName, pattern: part }) => {
   const [target, clip] = findPattern(doc, trackName, part.bar);
   target.replaceChild(addPattern(target, part), clip);
-  return save(doc, output);
+});
+edit('add_pattern', 'Add a pattern to an existing instrument track at an unused bar.', {
+  trackName: z.string(), pattern,
+}, (doc, { trackName, pattern: part }) => {
+  const target = instrumentOf(doc, trackName).parentNode;
+  if (children(target, 'pattern').some(p => Number(p.getAttribute('pos')) === part.bar * 192)) {
+    throw new Error('A pattern already starts at that bar. Use replace_pattern.');
+  }
+  addPattern(target, part);
+});
+edit('add_track', 'Add an instrument track with its patterns to an existing project.', {
+  track, tuning: z.enum(['concert', 'preset']).default('concert'),
+}, async (doc, { track: item, tuning }) => {
+  if (item.name === anchorName || tracks(doc).some(t => t.getAttribute('name') === item.name)) throw new Error('Track name is already in use');
+  await checkTrack(item);
+  const anchor = tracks(doc).find(isAnchor);
+  const instrument = addTrack(container(doc), item);
+  if (anchor) container(doc).appendChild(anchor); // keep the anchor last
+  return item.preset ? { preset: await loadPreset(doc, instrument, item.preset, { tuning }) } : undefined;
+});
+edit('remove_track', 'Remove an instrument track and any automation clips linked to it.', {
+  trackName: z.string(),
+}, (doc, { trackName }) => {
+  const target = instrumentOf(doc, trackName).parentNode;
+  const ids = new Set(Array.from(target.getElementsByTagName('*')).map(node => node.getAttribute('id')).filter(Boolean));
+  for (const t of tracks(doc).filter(t => t.getAttribute('type') === '5')) {
+    for (const clip of children(t, 'automationpattern')) {
+      if (children(clip, 'object').some(object => ids.has(object.getAttribute('id')))) t.removeChild(clip);
+    }
+    if (!children(t, 'automationpattern').length) t.parentNode.removeChild(t);
+  }
+  target.parentNode.removeChild(target);
+});
+edit('copy_bars', 'Repeat a section: copy every pattern that lies inside a bar range to a new position, on all instrument tracks or the named ones.', {
+  fromBar: z.number().int().min(0).max(999), bars: z.number().int().min(1).max(256), toBar: z.number().int().min(0).max(999),
+  tracks: z.array(z.string()).min(1).optional(),
+}, (doc, { fromBar, bars, toBar, tracks: names }) => {
+  const start = fromBar * 192, end = start + bars * 192, shift = (toBar - fromBar) * 192;
+  const targets = names ? names.map(name => instrumentOf(doc, name).parentNode) : tracks(doc).filter(t => t.getAttribute('type') === '0');
+  let copied = 0;
+  for (const target of targets) {
+    const clips = children(target, 'pattern');
+    for (const clip of clips) {
+      const pos = Number(clip.getAttribute('pos'));
+      if (pos < start || pos + Number(clip.getAttribute('len')) > end) continue;
+      if (clips.some(other => Number(other.getAttribute('pos')) === pos + shift)) {
+        throw new Error(`Track "${target.getAttribute('name')}" already has a pattern at bar ${(pos + shift) / 192}`);
+      }
+      target.appendChild(clip.cloneNode(true)).setAttribute('pos', String(pos + shift));
+      copied++;
+    }
+  }
+  if (!copied) throw new Error('No pattern lies fully inside that bar range');
+  return { copiedPatterns: copied };
+});
+edit('set_song_length', 'Pin the song to an exact number of bars so loops keep empty closing bars, or pass null to remove the pin.', {
+  bars: z.number().int().min(1).max(1000).nullable(),
+}, (doc, { bars }) => {
+  setAnchor(doc, null);
+  const natural = songInfo(doc).lengthBars;
+  if (bars !== null && bars < natural) throw new Error(`The notes already run for ${natural} bars`);
+  if (bars !== null && bars > natural) setAnchor(doc, bars);
+  const info = songInfo(doc);
+  return { lengthBars: info.lengthBars, lengthSeconds: Number(info.lengthSeconds.toFixed(4)) };
 });
 tool('save_project_copy', 'Copy a native saved project between .mmp and .mmpz, preserving its XML content.', {
   project: projectName, output: projectName,
 }, async ({ project, output }) => save(await load(project), output));
-tool('set_track_mix', 'Save a project copy with volume, pan, mute or solo changed on one instrument track.', {
-  project: projectName, output: projectName, trackName: z.string(),
-  volume: z.number().int().min(0).max(200).optional(),
-  pan: z.number().int().min(-100).max(100).optional(),
+edit('set_track_mix', 'Change volume (0-200, fractions allowed), pan, mute or solo on one instrument track. Solo is honoured by render_mix.', {
+  trackName: z.string(), volume: volume.optional(),
+  pan: z.number().min(-100).max(100).optional(),
   mute: z.boolean().optional(), solo: z.boolean().optional(),
-}, async ({ project, output, trackName, volume, pan, mute, solo }) => {
-  if ([volume, pan, mute, solo].every(value => value === undefined)) throw new Error('Provide at least one mix control');
-  const doc = await load(project);
-  const matching = tracks(doc).filter(t => t.getAttribute('name') === trackName && t.getAttribute('type') === '0');
-  if (matching.length !== 1) throw new Error('Expected one matching instrument track');
-  const [target] = matching;
-  const [instrument] = children(target, 'instrumenttrack');
-  for (const [node, key, value] of [[instrument, 'vol', volume], [instrument, 'pan', pan],
+}, (doc, { trackName, volume: level, pan, mute, solo }) => {
+  if ([level, pan, mute, solo].every(value => value === undefined)) throw new Error('Provide at least one mix control');
+  const instrument = instrumentOf(doc, trackName), target = instrument.parentNode;
+  for (const [node, key, value] of [[instrument, 'vol', level], [instrument, 'pan', pan],
     [target, 'muted', mute], [target, 'solo', solo]]) {
     if (value === undefined) continue;
-    if (children(node, key).length) throw new Error('Control uses an LMMS model. Edit its automation in LMMS.');
+    if (children(node, key).length) throw new Error(`"${trackName}" ${key} is automated. Remove or edit its automation instead.`);
     node.setAttribute(key, String(typeof value === 'boolean' ? Number(value) : value));
   }
-  return save(doc, output);
 });
-const presetFile = z.string().regex(/^[\w -]+\/[\w .()-]+\.xpf$/i);
+edit('set_master', 'Set master volume (0-200) and master pitch in semitones.', {
+  volume: volume.optional(), pitch: z.number().int().min(-12).max(12).optional(),
+}, (doc, { volume: level, pitch }) => {
+  const { head } = songInfo(doc);
+  if (level === undefined && pitch === undefined) throw new Error('Provide volume or pitch');
+  for (const [key, value] of [['mastervol', level], ['masterpitch', pitch]]) {
+    if (value === undefined) continue;
+    if (children(head, key).length) throw new Error('That master control is automated. Edit it in LMMS.');
+    head.setAttribute(key, String(value));
+  }
+});
+
 async function listPresets() {
   const groups = await readdir(presets, { withFileTypes: true });
   const files = await Promise.all(groups.filter(group => group.isDirectory()).map(async group => {
     const entries = await readdir(path.join(presets, group.name), { withFileTypes: true });
     return entries.filter(entry => entry.isFile()).map(entry => group.name + '/' + entry.name);
   }));
-  return files.flat().filter(name => presetFile.safeParse(name).success).sort();
+  return files.flat().filter(name => name.endsWith('.xpf') && presetFile.safeParse(name).success).sort();
 }
-tool('list_presets', 'List installed XML factory preset paths.', {}, listPresets);
-
-tool('search_sounds', 'Find Fathom patches and installed LMMS factory presets by name, engine and sound tags.', {
-  query: z.string().max(120).default(''), engine: z.enum(['fathom', 'lmms']).optional(),
-  limit: z.number().int().min(1).max(100).default(20),
-}, async args => {
-  let native = [];
-  let nativePresetError;
-  if (args.engine !== 'fathom') {
-    try { native = await listPresets(); } catch (error) { nativePresetError = error.code ?? error.message; }
-  }
-  const worklet = process.env.LMMS_FATHOM_WORKLET;
-  return { ...searchSounds(args, native), fathomAvailable: Boolean(worklet && existsSync(worklet)), nativePresetError };
-});
-
-tool('preview_sound', 'Render a short audition of a Fathom patch or stock LMMS preset to a workspace WAV.', {
-  patchId: patchId.optional(), preset: presetFile.optional(), output: wavName,
-  midi: z.number().int().min(24).max(84).optional(),
-}, async ({ patchId: id, preset, output, midi }) => {
-  if (Boolean(id) === Boolean(preset)) throw new Error('Supply exactly one of patchId or preset');
-  if (existsSync(path.join(root, output))) throw new Error('Output already exists');
-  if (preset) {
-    const temp = await mkdtemp(path.join(root, '.preview-'));
-    try {
-      const doc = createSong(120, [{ name: 'Preview', voice: 'pluck', volume: 45, pan: 0,
-        patterns: [{ name: 'Preview', bar: 0, bars: 1,
-          notes: [0, 7, 12, 3].map((offset, i) => ({ tick: i * 36, midi: (midi ?? 57) + offset, length: 29, velocity: 76 })) }] }], 65);
-      await loadPreset(doc, instrumentOf(doc, 'Preview'), preset);
-      const project = path.join(temp, 'preview.mmp');
-      const rendered = path.join(temp, 'preview.wav');
-      await writeFile(project, xml.serializeToString(doc));
-      await run(lmms, ['render', project, '-s', '48000', '-f', 'wav', '-l', '-o', rendered],
-        { cwd: root, timeout: 30000, windowsHide: true });
-      const wav = await readFile(rendered);
-      const stats = measureWav(wav);
-      if (stats.peakDbfs === null) throw new Error('Native preset preview is silent. Try a different MIDI root or preset.');
-      await writeFile(path.join(root, output), wav, { flag: 'wx' });
-      return { preset, audio: output, ...stats };
-    } finally {
-      await rm(temp, { recursive: true });
-    }
-  }
-  const worklet = process.env.LMMS_FATHOM_WORKLET;
-  if (!worklet) throw new Error('Set LMMS_FATHOM_WORKLET to preview Fathom patches');
-  const sound = fathomPatches[id];
-  const patch = structuredClone(sound.patch);
-  const notes = sound.phrase.map(([tick, interval, length, velocity]) => ({
-    tick, midi: (midi ?? sound.root) + interval, length, velocity,
+async function listZynPresets() {
+  const bank = path.join(presets, 'ZynAddSubFX');
+  const groups = await readdir(bank, { withFileTypes: true }).catch(() => []);
+  const files = await Promise.all(groups.filter(group => group.isDirectory()).map(async group => {
+    const entries = await readdir(path.join(bank, group.name), { withFileTypes: true });
+    return entries.filter(entry => entry.isFile()).map(entry => `ZynAddSubFX/${group.name}/${entry.name}`);
   }));
-  const wav = await renderFathom({ worklet, patch, notes, cutoff: [{ tick: 0, hz: patch.filter.cutoff }],
-    secondsPerTick: 1 / 96, durationTicks: 192 });
-  await writeFile(path.join(root, output), wav, { flag: 'wx' });
-  return { patchId: id, audio: output, ...measureWav(wav) };
+  return files.flat().filter(name => name.endsWith('.xiz') && presetFile.safeParse(name).success).sort();
+}
+tool('list_presets', 'List installed factory presets: native .xpf paths, plus ZynAddSubFX bank folders with counts (pass a bank to list its .xiz patches).', {
+  zynBank: z.string().regex(/^[\w -]+$/).optional(),
+}, async ({ zynBank }) => {
+  const zyn = await listZynPresets();
+  if (zynBank) return zyn.filter(name => name.split('/')[1].toLowerCase() === zynBank.toLowerCase());
+  const banks = {};
+  for (const name of zyn) banks[name.split('/')[1]] = (banks[name.split('/')[1]] ?? 0) + 1;
+  return { presets: await listPresets(), zynBanks: banks };
 });
 
-// Instrument plugin IDs used by the stock LMMS 1.2 series.
-const instruments = {
-  audiofileprocessor: 'Sample playback', bitinvader: 'Wavetable synthesis', carlarack: 'External plugin host',
-  carlapatchbay: 'External plugin host', gigplayer: 'GIG sampler', kicker: 'Kick drum synthesis',
-  lb302: 'Acid bass synthesis', malletsstk: 'Physical modelling', monstro: 'Subtractive and modulation synthesis',
-  nes: 'NES-style synthesis', opl2: 'FM synthesis', organic: 'Additive synthesis', papu: 'Game Boy-style synthesis',
-  patman: 'GUS patch sampler', sf2player: 'SoundFont player', sfxr: 'Retro game sound effects',
-  sid: 'SID-style synthesis', tripleoscillator: 'Three-oscillator subtractive synthesis', vestige: 'VST instrument host',
-  vibedstrings: 'Plucked string modelling', watsyn: 'Wavetable synthesis', zynaddsubfx: 'Additive and subtractive synthesis',
-};
-async function installedInstrumentIds() {
-  const entries = await readdir(pluginDirectory, { withFileTypes: true });
-  const modules = new Set(entries.filter(entry => /\.(dll|so|dylib)$/i.test(entry.name))
-    .map(entry => entry.name.toLowerCase().replace(/\.(dll|so|dylib)$/, '')));
-  return Object.keys(instruments).filter(id => modules.has(id) || modules.has('lib' + id));
-}
-tool('list_instruments', 'Discover known stock instrument plugins found on disk, factory presets and Fathom bridge configuration.', {}, async () => {
-  const [plugins, factoryPresets] = await Promise.allSettled([installedInstrumentIds(), listPresets()]);
-  const worklet = process.env.LMMS_FATHOM_WORKLET;
-  return {
-    builtInVoices: [...Object.keys(tones), ...Object.keys(kit), 'sample'],
-    nativePlugins: (plugins.value ?? []).map(id => ({ id, family: instruments[id] })),
-    pluginScan: plugins.status === 'fulfilled' ? pluginDirectory : { directory: pluginDirectory, error: plugins.reason.code },
-    factoryPresets: factoryPresets.value ?? [],
-    presetScan: factoryPresets.status === 'fulfilled' ? presets : { directory: presets, error: factoryPresets.reason.code },
-    fathom: { configured: Boolean(worklet), workletFound: Boolean(worklet && existsSync(worklet)),
-      models: ['fathom', 'vesper', 'halo'], tool: 'render_fathom_track' },
-  };
-});
-function instrumentOf(doc, name) {
-  const matching = tracks(doc).filter(track => track.getAttribute('name') === name && track.getAttribute('type') === '0');
-  const instrument = matching.length === 1 && children(matching[0], 'instrumenttrack')[0];
-  if (!instrument) throw new Error('Expected one instrument track named ' + name);
-  return instrument;
-}
-tool('set_native_instrument', 'Load an installed stock LMMS instrument at its default settings. Keep existing notes, mixer routing and track controls.', {
-  project: projectName, output: projectName, trackName: z.string(), instrument: z.enum(Object.keys(instruments)),
-}, async ({ project, output, trackName, instrument }) => {
-  if (!(await installedInstrumentIds()).includes(instrument)) throw new Error('Instrument plugin was not found in LMMS_PLUGINS');
-  const doc = await load(project);
-  const target = instrumentOf(doc, trackName);
-  const [previous] = children(target, 'instrument');
-  if (previous && Array.from(previous.getElementsByTagName('*')).some(node => node.hasAttribute('id'))) {
-    throw new Error('Existing instrument has linked controls');
+// ---------- rendering ----------
+const renderLimit = Number(process.env.LMMS_RENDER_TIMEOUT_SECONDS) || null;
+function forRender(doc) {
+  const copy = parse(xml.serializeToString(doc));
+  const list = tracks(copy);
+  // LMMS applies solo in its window, not in the file, so a headless render needs the mutes written out.
+  if (list.some(t => t.getAttribute('solo') === '1')) {
+    for (const t of list) if (!isControl(t) && t.getAttribute('solo') !== '1') t.setAttribute('muted', '1');
   }
-  if (previous) target.removeChild(previous);
-  add(add(target, 'instrument', { name: instrument }), instrument);
-  return save(doc, output);
-});
-async function loadPreset(doc, target, preset) {
-  const source = new DOMParser().parseFromString(await readFile(path.join(presets, preset), 'utf8'), 'application/xml');
-  const settings = Array.from(source.getElementsByTagName('instrumenttrack'))[0];
-  if (!settings || !children(settings, 'instrument').length) throw new Error('Expected a native instrument preset with an instrument element');
-  for (const tag of ['instrument', 'eldata']) {
-    const [next] = children(settings, tag);
-    const [previous] = children(target, tag);
-    if (previous && Array.from(previous.getElementsByTagName('*')).some(node => node.hasAttribute('id'))) {
-      throw new Error('Existing instrument has linked controls');
+  return copy;
+}
+function isolate(doc, keep) {
+  const copy = parse(xml.serializeToString(doc));
+  tracks(copy).forEach((t, index) => {
+    if (isControl(t)) return;
+    t.setAttribute('solo', '0');
+    if (!keep.has(index)) t.setAttribute('muted', '1');
+  });
+  return copy;
+}
+async function renderDoc(doc, { loop = true, prepared = false } = {}) {
+  const copy = prepared ? doc : forRender(doc);
+  const seconds = renderLimit ?? Math.min(3600, Math.max(180, Math.round(songInfo(doc).lengthSeconds * 10 + 120)));
+  const temp = await mkdtemp(path.join(root, '.render-'));
+  try {
+    const project = path.join(temp, 'render.mmp'), rendered = path.join(temp, 'render.wav');
+    await writeFile(project, xml.serializeToString(copy));
+    try {
+      await run(lmms, ['render', project, '-s', '48000', '-f', 'wav', ...(loop ? ['-l'] : []), '-o', rendered],
+        { cwd: root, timeout: seconds * 1000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    } catch (error) {
+      if (error.killed) throw new Error(`LMMS did not finish rendering within ${seconds} seconds. Set LMMS_RENDER_TIMEOUT_SECONDS to allow longer.`);
+      throw new Error(error.code === 'ENOENT' ? `LMMS was not found at ${lmms}. Set LMMS_EXECUTABLE.` : 'LMMS render failed: ' + String(error.message).split('\n')[0]);
     }
-    if (next && Array.from(next.getElementsByTagName('*')).some(node => node.hasAttribute('id'))) {
-      throw new Error('Preset contains model IDs that require remapping');
-    }
-    if (previous) target.removeChild(previous);
-    if (next) target.appendChild(doc.importNode(next, true));
+    return await readFile(rendered);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
   }
-  const baseNote = settings.getAttribute('basenote');
-  if (baseNote) target.setAttribute('basenote', baseNote);
 }
-tool('apply_preset', 'Load an installed XML preset sound into a track in a new project copy.', {
-  project: projectName, output: projectName, trackName: z.string(), preset: presetFile,
-}, async ({ project, output, trackName, preset }) => {
-  const doc = await load(project);
-  await loadPreset(doc, instrumentOf(doc, trackName), preset);
-  return save(doc, output);
-});
-tool('route_mixer_bus', 'Create a mixer bus sending to Master and route named instrument tracks to it.', {
-  project: projectName, output: projectName, bus: z.string().min(1).max(80),
-  tracks: z.array(z.string()).min(1), gain: z.number().min(0).max(2).default(1),
-}, async ({ project, output, bus, tracks: names, gain }) => {
-  const doc = await load(project);
-  const targets = names.map(name => instrumentOf(doc, name));
-  const [song] = children(doc.documentElement, 'song');
-  const mixer = children(song, 'fxmixer')[0] ?? add(song, 'fxmixer');
-  if (!children(mixer, 'fxchannel').length) add(mixer, 'fxchannel', { num: 0, name: 'Master', volume: 1 });
-  const channels = children(mixer, 'fxchannel');
-  if (channels.some(channel => channel.getAttribute('name') === bus)) throw new Error('Mixer bus already exists');
-  const number = Math.max(...channels.map(channel => Number(channel.getAttribute('num')))) + 1;
-  const channel = add(mixer, 'fxchannel', { num: number, name: bus, volume: gain, muted: 0, soloed: 0 });
-  add(channel, 'fxchain', { numofeffects: 0, enabled: 0 });
-  add(channel, 'send', { channel: 0, amount: 1 });
-  for (const target of targets) target.setAttribute('fxch', String(number));
-  return save(doc, output);
-});
-tool('automate_track', 'Write an editable automation clip for instrument track volume or low-pass cutoff.', {
-  project: projectName, output: projectName, trackName: z.string(), name: z.string().min(1),
-  control: z.enum(['volume', 'cutoff']), startTick: z.number().int().min(0),
-  length: z.number().int().min(1), points: z.array(z.object({
-    tick: z.number().int().min(0), value: z.number(),
-  })).min(2).max(4096),
-}, async ({ project, output, trackName, name, control, startTick, length, points }) => {
-  const doc = await load(project);
-  const instrument = instrumentOf(doc, trackName);
-  const parent = control === 'volume' ? instrument : children(instrument, 'eldata')[0];
-  const key = control === 'volume' ? 'vol' : 'fcut';
-  const [min, max] = control === 'volume' ? [0, 200] : [5, 14000];
-  if (!parent) throw new Error('Track has no filter controls');
-  if (children(parent, key).length) throw new Error('Control already has a model or automation');
-  if (points[0].tick !== 0 || points.some(({ tick, value }, index) =>
-    tick >= length || value < min || value > max || (index > 0 && tick <= points[index - 1].tick))) {
-    throw new Error('Use ascending unique ticks starting at zero and values within the control range');
+async function pool(items, limit, work) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const index = next++; results[index] = await work(items[index], index); }
+  }));
+  return results;
+}
+const parallelRenders = Math.max(1, Math.min(4, Number(process.env.LMMS_PARALLEL_RENDERS) || 3));
+let ffmpegFound;
+async function hasFfmpeg() {
+  ffmpegFound ??= run(ffmpeg, ['-version'], { windowsHide: true }).then(() => true, () => false);
+  return ffmpegFound;
+}
+async function writeAudio(file, wav, overwrite = false) {
+  if (!file.toLowerCase().endsWith('.ogg')) return writeFile(file, wav, { flag: overwrite ? 'w' : 'wx' });
+  if (!(await hasFfmpeg())) throw new Error('OGG output needs ffmpeg. Install it or set LMMS_FFMPEG to its path.');
+  if (existsSync(file)) throw new Error('Output already exists');
+  const temp = await mkdtemp(path.join(root, '.encode-'));
+  try {
+    await writeFile(path.join(temp, 'in.wav'), wav);
+    await run(ffmpeg, ['-v', 'error', '-n', '-i', path.join(temp, 'in.wav'), '-c:a', 'libvorbis', '-q:a', '6', file], { windowsHide: true, timeout: 120000 });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
   }
-  const used = new Set(Array.from(doc.getElementsByTagName('*')).map(node => Number(node.getAttribute('id'))));
-  let id = 10000;
-  while (used.has(id)) id++;
-  parent.removeAttribute(key);
-  if (control === 'cutoff') {
-    parent.setAttribute('fwet', '1');
-    parent.setAttribute('ftype', '0');
+}
+// Bring audio to a loudness target under a peak ceiling. Returns what was done.
+function masterAudio(audio, { targetLufs, ceilingDb, wrap = false }) {
+  if (targetLufs === undefined && ceilingDb === undefined) return null;
+  const report = { gainDb: 0 };
+  const ceiling = ceilingDb ?? -1;
+  for (let pass = 0; pass < (targetLufs === undefined ? 1 : 2); pass++) {
+    if (targetLufs !== undefined) {
+      const measured = dsp.loudness(audio).integratedLufs;
+      if (measured === null) throw new Error('Cannot set the loudness of silence');
+      const gain = targetLufs - measured;
+      if (pass && gain < 0.2) break;
+      dsp.applyGain(audio, 10 ** (gain / 20));
+      report.gainDb = Number((report.gainDb + gain).toFixed(2));
+    }
+    const limited = dsp.limit(audio, ceiling, { wrap });
+    report.limiter = { ceilingDb: ceiling, limitedSamples: (report.limiter?.limitedSamples ?? 0) + limited.limitedSamples,
+      maxReductionDb: Math.min(report.limiter?.maxReductionDb ?? 0, limited.maxReductionDb) };
+    if (!limited.limitedSamples) break;
   }
-  add(parent, key, { id, value: points[0].value, scale_type: 'linear' });
-  const automation = add(instrument.parentNode.parentNode, 'track', { type: 5, name, muted: 0, solo: 0 });
-  const clip = add(automation, 'automationpattern', { name, pos: startTick, len: length, prog: 1, tens: 1, mute: 0 });
-  for (const point of points) add(clip, 'time', { pos: point.tick, value: point.value });
-  add(clip, 'object', { id });
-  return save(doc, output);
-});
-tool('inspect_arrangement', 'Read tempo, meter, mixer routes, instrument types and timeline clips.', {
-  project: projectName,
-}, async ({ project }) => {
-  const doc = await load(project);
-  const [head] = children(doc.documentElement, 'head');
-  const [song] = children(doc.documentElement, 'song');
-  const [mixer] = children(song, 'fxmixer');
-  return {
-    tempo: Number(head?.getAttribute('bpm') || 140),
-    meter: [Number(head?.getAttribute('timesig_numerator') || 4), Number(head?.getAttribute('timesig_denominator') || 4)],
-    mixer: mixer ? children(mixer, 'fxchannel').map(bus => ({
-      id: Number(bus.getAttribute('num')), name: bus.getAttribute('name'),
-      sends: children(bus, 'send').map(send => ({
-        channel: Number(send.getAttribute('channel')), amount: Number(send.getAttribute('amount')),
-      })),
-    })) : [],
-    tracks: tracks(doc).map(track => {
-      const [instrument] = children(track, 'instrumenttrack');
-      return {
-        name: track.getAttribute('name'), type: Number(track.getAttribute('type')),
-        instrument: instrument ? children(instrument, 'instrument')[0]?.getAttribute('name') ?? null : null,
-        mixerChannel: instrument ? Number(instrument.getAttribute('fxch')) : null,
-        clips: ['pattern', 'automationpattern', 'sampletco', 'bbtco'].flatMap(tag =>
-          children(track, tag).map(clip => ({
-            type: tag, name: clip.getAttribute('name'), tick: Number(clip.getAttribute('pos')),
-            length: Number(clip.getAttribute('len')),
-            ...(tag === 'sampletco' ? { source: clip.getAttribute('src'), muted: clip.getAttribute('muted') === '1' } : {}),
-            ...(tag === 'automationpattern' ? {
-              points: children(clip, 'time').map(point => ({
-                tick: Number(point.getAttribute('pos')), value: Number(point.getAttribute('value')),
-              })),
-            } : {}),
-          }))),
-      };
-    }),
-  };
-});
-tool('set_project_tempo', 'Save a new project copy with a static tempo. Existing note and clip ticks stay fixed.', {
-  project: projectName, output: projectName, bpm: z.number().int().min(45).max(240),
-}, async ({ project, output, bpm }) => {
-  const doc = await load(project);
-  const [head] = children(doc.documentElement, 'head');
-  if (!head || children(head, 'bpm').length) throw new Error('Expected a project with a static tempo');
-  head.setAttribute('bpm', String(bpm));
-  return save(doc, output);
-});
+  if (report.limiter.maxReductionDb < -6) report.warning = 'The limiter is working hard (more than 6 dB). Lower the loudness target or rebalance the mix.';
+  return report;
+}
+function barFrames(info, sampleRate) {
+  if (!info.staticTempo) throw new Error('Loop-safe rendering needs a static tempo');
+  return Math.round(info.secondsPerBar * sampleRate);
+}
 function readPcm(wav) {
   if (wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') {
     throw new Error('LMMS did not produce a RIFF WAV');
@@ -568,11 +643,568 @@ function measureWav(wav) {
     const last = samples.length - frameBytes + ch;
     boundaryJump = Math.max(boundaryJump, Math.abs(samples.readInt16LE(ch) - samples.readInt16LE(last)));
   }
-  const db = value => value === 0 ? null : Number((20 * Math.log10(value / 32768)).toFixed(2));
+  const level = value => value === 0 ? null : Number((20 * Math.log10(value / 32768)).toFixed(2));
   return { channels, sampleRate, durationSeconds: samples.length / frameBytes / sampleRate,
-    peakDbfs: db(peak), rmsDbfs: db(Math.sqrt(sumSquares / (samples.length / 2))),
-    fullScaleSamples, boundaryJumpDbfs: db(boundaryJump) };
+    peakDbfs: level(peak), rmsDbfs: level(Math.sqrt(sumSquares / (samples.length / 2))),
+    fullScaleSamples, boundaryJumpDbfs: level(boundaryJump) };
 }
+const tailMode = z.enum(['cut', 'wrap', 'keep']).default('cut')
+  .describe('cut: stop at the last bar (default). wrap: fold the reverb and delay tail back onto the start for a seamless loop. keep: let the tail ring out (one extra bar).');
+const loudnessTarget = z.number().min(-36).max(-6).optional().describe('Integrated loudness target in LUFS, for example -16 for game music.');
+const ceilingTarget = z.number().min(-12).max(0).optional().describe('Peak ceiling in dBFS for the built-in limiter (default -1 when a loudness target is set).');
+async function renderMix(doc, { tail = 'cut', targetLufs, ceilingDb } = {}) {
+  const info = songInfo(doc);
+  const raw = await renderDoc(doc, { loop: tail === 'cut' });
+  if (tail === 'cut' && targetLufs === undefined && ceilingDb === undefined) return { wav: raw, audio: null, info };
+  let audio = dsp.decodeWav(raw);
+  if (tail === 'wrap') audio = dsp.foldTail(audio, Math.max(1, audio.frames - barFrames(info, audio.sampleRate)));
+  const mastering = masterAudio(audio, { targetLufs, ceilingDb, wrap: tail === 'wrap' });
+  return { wav: dsp.encodeWav(audio), audio, info, mastering };
+}
+tool('render_mix', 'Render the song to a 48 kHz WAV or OGG and report duration, peak, RMS, loudness, clipped samples and the loop boundary jump. Honours solo. Optional loop-safe tail and loudness mastering.', {
+  project: projectName, output: audioOut, tail: tailMode, targetLufs: loudnessTarget, ceilingDb: ceilingTarget,
+}, async ({ project, output, tail, targetLufs, ceilingDb }) => {
+  if (existsSync(path.join(root, output))) throw new Error('Output already exists');
+  const doc = await load(project);
+  const { wav, audio, info, mastering } = await renderMix(doc, { tail, targetLufs, ceilingDb });
+  await writeAudio(path.join(root, output), wav);
+  const decoded = audio ?? dsp.decodeWav(wav);
+  const stats = measureWav(wav);
+  const expected = info.lengthSeconds + (tail === 'keep' ? info.secondsPerBar : 0);
+  const warnings = [];
+  if (stats.fullScaleSamples) warnings.push(`${stats.fullScaleSamples} samples clip. Lower track or master volume, or pass targetLufs or ceilingDb.`);
+  if (Math.abs(stats.durationSeconds - expected) > 0.05) warnings.push(`Rendered ${stats.durationSeconds.toFixed(3)} s but the arrangement reads as ${expected.toFixed(3)} s.`);
+  return { audio: output, bytes: wav.length, ...stats, bars: info.lengthBars, tail,
+    integratedLufs: dsp.loudness(decoded).integratedLufs, truePeakDbfs: dsp.db(dsp.truePeak(decoded)),
+    ...(mastering ? { mastering } : {}), ...(warnings.length ? { warnings } : {}) };
+});
+const safeFile = name => name.replace(/[^a-z0-9 _-]+/gi, '_').trim() || 'track';
+tool('render_stems', 'Render one WAV per instrument, sample or Beat/Bassline track, all aligned to the mix length. Works for full-length songs; renders run in parallel.', {
+  project: projectName, outputDirectory: folderName,
+  tracks: z.array(z.string()).min(1).optional().describe('Only these track names (default: every unmuted audio track).'),
+  tail: z.enum(['cut', 'wrap']).default('cut'),
+}, async ({ project, outputDirectory, tracks: names, tail }) => {
+  const doc = await load(project);
+  const info = songInfo(doc);
+  const all = tracks(doc);
+  const wanted = all.map((t, index) => ({ t, index })).filter(({ t }) => !isControl(t) && t.getAttribute('muted') !== '1' &&
+    (!names || names.includes(t.getAttribute('name'))));
+  if (names && wanted.length !== names.length) throw new Error('Some named tracks were not found or are muted');
+  if (!wanted.length) throw new Error('No audio tracks to render');
+  const output = path.join(root, outputDirectory);
+  await mkdir(output);
+  try {
+    const frames = Math.round(info.lengthSeconds * 48000);
+    const stems = await pool(wanted, parallelRenders, async ({ t, index }) => {
+      let audio = dsp.decodeWav(await renderDoc(isolate(doc, new Set([index])), { loop: tail === 'cut', prepared: true }));
+      audio = tail === 'wrap' ? dsp.foldTail(dsp.fitLength(audio, frames + barFrames(info, audio.sampleRate)), frames) : dsp.fitLength(audio, frames);
+      const file = `${index + 1}_${safeFile(t.getAttribute('name'))}.wav`;
+      const wav = dsp.encodeWav(audio);
+      await writeFile(path.join(output, file), wav, { flag: 'wx' });
+      return { file, track: t.getAttribute('name'), ...measureWav(wav) };
+    });
+    return { directory: outputDirectory, bars: info.lengthBars, stems };
+  } catch (error) {
+    await rm(output, { recursive: true, force: true }); // created by this call
+    throw new Error('Stem render failed and its folder was removed: ' + error.message);
+  }
+});
+
+// ---------- listening ----------
+const section = z.object({ name: z.string().min(1).max(60), startBar: z.number().min(0).optional(), bars: z.number().min(0.25).optional(),
+  startSeconds: z.number().min(0).optional(), endSeconds: z.number().min(0).optional() });
+const pngName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.png$/i);
+tool('analyze_audio', 'Measure a workspace WAV so you can judge a mix without hearing it: integrated loudness (LUFS), true peak, RMS, crest, clipping, DC, stereo correlation, energy in six frequency bands, spectral centroid, loop seam, optional per-section levels and pitch, plus plain-language warnings. Can return a spectrogram image.', {
+  audio: workspaceWav, bpm: z.number().min(20).max(400).optional().describe('Needed when sections are given in bars.'),
+  sections: z.array(section).max(64).default([]), pitch: z.boolean().default(false),
+  loop: z.boolean().default(false).describe('Check the file as a loop.'), targetLufs: loudnessTarget,
+  spectrogram: pngName.optional().describe('Also write this PNG to the workspace and return it as an image.'),
+}, async ({ audio: file, bpm, sections, pitch, loop, targetLufs, spectrogram }) => {
+  if (spectrogram && existsSync(path.join(root, spectrogram))) throw new Error('Spectrogram output already exists');
+  const audio = dsp.decodeWav(await readFile(path.join(root, file)));
+  const spans = sections.map(({ name, startBar, bars, startSeconds, endSeconds }) => {
+    if (startBar !== undefined) {
+      if (!bpm) throw new Error('Pass bpm to describe sections in bars');
+      return { name, startSeconds: startBar * 240 / bpm, endSeconds: (startBar + (bars ?? 1)) * 240 / bpm };
+    }
+    if (startSeconds === undefined || endSeconds === undefined || endSeconds <= startSeconds) throw new Error(`Section "${name}" needs startBar, or startSeconds and endSeconds`);
+    return { name, startSeconds, endSeconds };
+  });
+  const report = dsp.analyze(audio, { sections: spans, pitch });
+  const result = { audio: file, ...report, warnings: dsp.advise(report, { loop, targetLufs }) };
+  if (spectrogram) {
+    const png = dsp.spectrogramPng(audio);
+    await writeFile(path.join(root, spectrogram), png, { flag: 'wx' });
+    result.spectrogram = { file: spectrogram, axes: 'time left to right, 40 Hz (bottom) to 16 kHz (top), log scale, brighter is louder' };
+    result[imagesKey] = [png];
+  }
+  return result;
+});
+
+// ---------- sounds ----------
+tool('list_samples', 'Browse the stock LMMS sample library (drums, basses, instruments, strings, effects and more). Returns factorySample paths for sample tracks.', {
+  group: z.string().regex(/^[\w -]+$/).optional(), query: z.string().max(60).default(''),
+  limit: z.number().int().min(1).max(300).default(60),
+}, async ({ group, query, limit }) => {
+  const found = [];
+  const groups = {};
+  for (const folder of await readdir(samplesDirectory, { withFileTypes: true })) {
+    if (!folder.isDirectory()) continue;
+    const walk = async relative => {
+      for (const entry of await readdir(path.join(samplesDirectory, relative), { withFileTypes: true })) {
+        const name = relative + '/' + entry.name;
+        if (entry.isDirectory() && name.split('/').length < 3) await walk(name);
+        else if (entry.isFile() && factorySample.safeParse(name).success) {
+          groups[folder.name] = (groups[folder.name] ?? 0) + 1;
+          found.push(name);
+        }
+      }
+    };
+    await walk(folder.name);
+  }
+  const tokens = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const matches = found.filter(name => (!group || name.split('/')[0].toLowerCase() === group.toLowerCase()) &&
+    tokens.every(token => name.toLowerCase().includes(token))).sort();
+  return { groups, total: matches.length, samples: matches.slice(0, limit) };
+});
+
+// Measured facts about factory sounds: level, tuning, envelope and brightness. A copy for stock LMMS 1.2.2 ships
+// with the server; build_sound_catalogue adds or refreshes entries in the workspace.
+const shippedCatalogue = fileURLToPath(new URL('./sound-catalogue.json', import.meta.url));
+const workspaceCatalogue = path.join(root, '.lmms-sound-catalogue.json');
+let measuredSounds;
+async function soundFacts() {
+  if (!measuredSounds) {
+    measuredSounds = {};
+    for (const file of [shippedCatalogue, workspaceCatalogue]) {
+      try { Object.assign(measuredSounds, JSON.parse(await readFile(file, 'utf8')).sounds); } catch { /* optional */ }
+    }
+  }
+  return measuredSounds;
+}
+const zynShell = inner => '<ZynAddSubFX-data version-major="2" version-minor="4" version-revision="1" ZynAddSubFX-author="Nasca Octavian Paul">' +
+  '<MASTER><par name="volume" value="80"/><par name="key_shift" value="64"/><PART id="0"><par_bool name="enabled" value="yes"/>' +
+  '<par name="volume" value="96"/><par name="panning" value="64"/><par name="min_key" value="0"/><par name="max_key" value="127"/>' +
+  '<par name="key_shift" value="64"/><par name="rcv_chn" value="0"/><par name="velocity_sensing" value="64"/><par name="velocity_offset" value="64"/>' +
+  '<par_bool name="note_on" value="yes"/><par_bool name="poly_mode" value="yes"/><par name="legato_mode" value="0"/><par name="key_limit" value="15"/>' +
+  inner + '</PART></MASTER></ZynAddSubFX-data>';
+const linked = node => node && Array.from(node.getElementsByTagName('*')).some(child => child.hasAttribute('id'));
+const settingsTags = new Set(['eldata', 'chordcreator', 'arpeggiator', 'midiport', 'fxchain', 'midi', 'surpos']);
+async function loadPresetRaw(doc, target, preset) {
+  const file = await readFile(path.join(presets, preset));
+  const [previousInstrument] = children(target, 'instrument');
+  const [previousEnvelope] = children(target, 'eldata');
+  if (linked(previousInstrument) || linked(previousEnvelope)) throw new Error('Existing instrument has linked controls');
+  if (preset.toLowerCase().endsWith('.xiz')) {
+    const source = (file[0] === 0x1f && file[1] === 0x8b ? gunzipSync(file, { maxOutputLength: 8 * 1024 * 1024 }) : file).toString('utf8');
+    const match = /<INSTRUMENT>[\s\S]*<\/INSTRUMENT>/.exec(source);
+    if (!match) throw new Error('Expected a ZynAddSubFX instrument file');
+    const data = new DOMParser().parseFromString(zynShell(match[0]), 'application/xml').documentElement;
+    if (previousInstrument) target.removeChild(previousInstrument);
+    if (previousEnvelope) target.removeChild(previousEnvelope);
+    const holder = add(add(target, 'instrument', { name: 'zynaddsubfx' }), 'zynaddsubfx', { modifiedcontrollers: '', portamento: 0,
+      filterfreq: 64, filterq: 64, bandwidth: 64, fmgain: 127, rescenterfreq: 64, resbandwidth: 64, forwardmidicc: 1 });
+    holder.appendChild(doc.importNode(data, true));
+    target.setAttribute('basenote', '57');
+    return;
+  }
+  const source = new DOMParser().parseFromString(file.toString('utf8'), 'application/xml');
+  // Three generations of preset file exist: <instrumenttrack><instrument>, a bare plugin element, and 0.x <channeltrack>.
+  const settings = source.getElementsByTagName('instrumenttrack')[0] ?? source.getElementsByTagName('channeltrack')[0];
+  if (!settings) throw new Error('Expected a native instrument preset');
+  let [instrument] = children(settings, 'instrument');
+  if (!instrument) {
+    const plugin = elements(settings).find(node => !settingsTags.has(node.nodeName));
+    if (!plugin) throw new Error('Preset has no instrument settings');
+    instrument = source.createElement('instrument');
+    instrument.setAttribute('name', plugin.nodeName);
+    instrument.appendChild(plugin.cloneNode(true));
+  }
+  const [envelope] = children(settings, 'eldata');
+  if (linked(instrument) || linked(envelope)) throw new Error('Preset contains model IDs that require remapping');
+  if (previousInstrument) target.removeChild(previousInstrument);
+  target.appendChild(doc.importNode(instrument, true));
+  if (envelope) {
+    if (previousEnvelope) target.removeChild(previousEnvelope);
+    const imported = target.appendChild(doc.importNode(envelope, true));
+    for (const node of elements(imported)) { // pre-1.0 files call the sustain level "sus"
+      if (node.hasAttribute('sus') && !node.hasAttribute('sustain')) node.setAttribute('sustain', node.getAttribute('sus'));
+    }
+  }
+  const baseNote = settings.getAttribute('basenote') ??
+    (settings.hasAttribute('baseoct') ? String(Number(settings.getAttribute('baseoct')) * 12 + Number(settings.getAttribute('basetone') || 9)) : null);
+  target.setAttribute('basenote', baseNote ?? '57');
+}
+const measuring = new Map();
+const probeVolume = 15;
+// A measured pitch offset is trusted when it agrees with the preset's stored base note, give or take whole octaves.
+// (MIDI-driven instruments such as ZynAddSubFX sound an octave below native synths in LMMS 1.2.)
+const trustedOffset = (offset, baseNote) => Math.abs(offset) <= 24 && ((offset - (57 - baseNote)) % 12 + 12) % 12 === 0;
+function measurePreset(preset) {
+  if (!measuring.has(preset)) {
+    measuring.set(preset, (async () => {
+      const doc = createSong(120, [{ name: 'Probe', voice: 'pluck', volume: probeVolume, pan: 0,
+        patterns: [{ name: 'Probe', bar: 0, bars: 2, notes: [{ tick: 0, midi: 60, length: 96, velocity: 100 }] }] }], 100);
+      await loadPresetRaw(doc, instrumentOf(doc, 'Probe'), preset);
+      setAnchor(doc, 2);
+      const audio = dsp.decodeWav(await renderDoc(doc, { prepared: true }));
+      const facts = measureInstrument(audio, { writtenMidi: 60, holdSeconds: 1 }, dsp);
+      if (facts.peakDbfs !== null) facts.peakDbfs = Number((facts.peakDbfs + 20 * Math.log10(60 / probeVolume)).toFixed(2));
+      return facts;
+    })());
+    measuring.get(preset).catch(() => measuring.delete(preset));
+  }
+  return measuring.get(preset);
+}
+async function factsFor(preset) {
+  return (await soundFacts())[preset] ?? measurePreset(preset);
+}
+// Load a preset. With concert tuning the track's base note is corrected so written pitch equals sounding pitch.
+async function loadPreset(doc, target, preset, { tuning = 'concert' } = {}) {
+  await loadPresetRaw(doc, target, preset);
+  const report = { preset, tuning, baseNote: Number(target.getAttribute('basenote')) };
+  let facts;
+  try { facts = await factsFor(preset); } catch (error) { report.measureError = error.message; }
+  if (facts) {
+    report.pitched = facts.pitched;
+    report.presetPitchOffsetSemitones = facts.pitchOffset;
+    report.peakDbfsAtVolume60 = facts.peakDbfs;
+    if (facts.peakDbfs !== null && facts.peakDbfs < -30) report.level = 'very quiet: raise the track volume';
+    if (facts.peakDbfs !== null && facts.peakDbfs > -3) report.level = 'very loud: start with a low track volume';
+    const trusted = facts.pitched && trustedOffset(facts.pitchOffset, report.baseNote);
+    if (facts.pitched && facts.pitchOffset && !trusted) {
+      report.note = 'The pitch reading for this preset is uncertain, so its tuning was left as saved. Check it with preview_sound.';
+    } else if (tuning === 'concert' && facts.pitched && facts.pitchOffset) {
+      report.baseNote += facts.pitchOffset;
+      target.setAttribute('basenote', String(report.baseNote));
+      report.corrected = true;
+    } else if (facts.pitched && facts.pitchOffset) {
+      report.note = `Written notes sound ${Math.abs(facts.pitchOffset)} semitones ${facts.pitchOffset < 0 ? 'lower' : 'higher'} with this preset.`;
+    }
+  }
+  return report;
+}
+edit('apply_preset', 'Load a factory preset (.xpf or ZynAddSubFX .xiz) onto a track. With the default concert tuning, presets saved at another base note are corrected so written notes sound at pitch; the result reports the measured offset and level.', {
+  trackName: z.string(), preset: presetFile, tuning: z.enum(['concert', 'preset']).default('concert'),
+}, async (doc, { trackName, preset, tuning }) => ({ preset: await loadPreset(doc, instrumentOf(doc, trackName), preset, { tuning }) }));
+
+tool('search_sounds', 'Find sounds by name, role and character across factory presets, ZynAddSubFX patches and Fathom patches. Measured entries carry level, tuning, envelope and brightness tags.', {
+  query: z.string().max(120).default(''), engine: z.enum(['fathom', 'lmms', 'zyn']).optional(),
+  role: z.enum(['bass', 'lead', 'pad', 'pluck', 'bell', 'keys', 'strings', 'brass', 'organ', 'drum', 'fx']).optional(),
+  limit: z.number().int().min(1).max(100).default(20),
+}, async args => {
+  let native = [], zyn = [], nativePresetError;
+  try {
+    if (args.engine !== 'fathom' && args.engine !== 'zyn') native = await listPresets();
+    if (args.engine !== 'fathom' && args.engine !== 'lmms') zyn = await listZynPresets();
+  } catch (error) { nativePresetError = error.code ?? error.message; }
+  const worklet = process.env.LMMS_FATHOM_WORKLET;
+  const fathomAvailable = Boolean(worklet && existsSync(worklet));
+  const facts = await soundFacts();
+  return { ...searchSounds({ ...args, fathomAvailable }, native, zyn, facts), fathomAvailable,
+    measuredSounds: Object.keys(facts).length, nativePresetError };
+});
+tool('build_sound_catalogue', 'Measure factory presets by rendering a test note, so search_sounds can filter by role, loudness, tuning and brightness. Processes up to `limit` unmeasured presets per call; call again until remaining is 0.', {
+  engine: z.enum(['lmms', 'zyn']).default('lmms'), zynBank: z.string().regex(/^[\w -]+$/).optional(),
+  limit: z.number().int().min(1).max(120).default(40), refresh: z.boolean().default(false),
+}, async ({ engine, zynBank, limit, refresh }) => {
+  const facts = await soundFacts();
+  let all = engine === 'lmms' ? await listPresets() : await listZynPresets();
+  if (zynBank) all = all.filter(name => name.split('/')[1]?.toLowerCase() === zynBank.toLowerCase());
+  const todo = all.filter(name => refresh || !facts[name]).slice(0, limit);
+  const failed = [];
+  await pool(todo, parallelRenders, async preset => {
+    measuring.delete(preset);
+    try { facts[preset] = await measurePreset(preset); } catch (error) { failed.push({ preset, error: error.message }); }
+  });
+  let own = {};
+  try { own = JSON.parse(await readFile(workspaceCatalogue, 'utf8')).sounds; } catch { /* first run */ }
+  for (const preset of todo) if (facts[preset]) own[preset] = facts[preset];
+  await writeFile(workspaceCatalogue, JSON.stringify({ lmms: '1.2', sounds: own }));
+  return { measured: todo.length - failed.length, failed, remaining: all.filter(name => !facts[name]).length, total: all.length };
+});
+
+tool('preview_sound', 'Render a short audition of a factory preset, stock sample or Fathom patch to a workspace WAV and report its level and detected pitch.', {
+  patchId: patchId.optional(), preset: presetFile.optional(), factorySample: factorySample.optional(), output: wavName,
+  midi: z.number().int().min(24).max(96).optional(),
+}, async ({ patchId: id, preset, factorySample: sample, output, midi }) => {
+  if ([id, preset, sample].filter(Boolean).length !== 1) throw new Error('Supply exactly one of patchId, preset or factorySample');
+  if (existsSync(path.join(root, output))) throw new Error('Output already exists');
+  if (preset || sample) {
+    const base = sample ? 69 : midi ?? 57;
+    const item = { name: 'Preview', voice: sample ? 'sample' : 'pluck', factorySample: sample, rootMidi: 69, volume: 45, pan: 0,
+      patterns: [{ name: 'Preview', bar: 0, bars: 1,
+        notes: (sample ? [0] : [0, 7, 12, 3]).map((offset, i) => ({ tick: i * 36, midi: base + offset, length: sample ? 180 : 29, velocity: 76 })) }] };
+    if (sample) await checkTrack(item);
+    const doc = createSong(120, [item], 65);
+    const loaded = preset ? await loadPreset(doc, instrumentOf(doc, 'Preview'), preset) : undefined;
+    const wav = await renderDoc(doc, { prepared: true });
+    const stats = measureWav(wav);
+    if (stats.peakDbfs === null) throw new Error('Preview is silent. Try a different MIDI root or sound.');
+    await writeFile(path.join(root, output), wav, { flag: 'wx' });
+    const audio = dsp.decodeWav(wav);
+    const pitch = sample ? undefined : dsp.detectPitch(audio.channels[0], audio.sampleRate, Math.round(audio.sampleRate * 0.1), Math.round(audio.sampleRate * 0.2));
+    return { ...(preset ? { preset, tuning: loaded } : { factorySample: sample }), audio: output, ...stats,
+      ...(sample ? {} : { writtenFirstNote: base, detectedFirstNote: pitch ? { midi: pitch.midi, note: dsp.midiName(pitch.midi) } : null }) };
+  }
+  const worklet = process.env.LMMS_FATHOM_WORKLET;
+  if (!worklet) throw new Error('Set LMMS_FATHOM_WORKLET to preview Fathom patches');
+  const sound = fathomPatches[id];
+  const patch = structuredClone(sound.patch);
+  const notes = sound.phrase.map(([tick, interval, length, velocity]) => ({
+    tick, midi: (midi ?? sound.root) + interval, length, velocity,
+  }));
+  const wav = await renderFathom({ worklet, patch, notes, cutoff: [{ tick: 0, hz: patch.filter.cutoff }],
+    secondsPerTick: 1 / 96, durationTicks: 192 });
+  await writeFile(path.join(root, output), wav, { flag: 'wx' });
+  return { patchId: id, audio: output, ...measureWav(wav) };
+});
+
+// Instrument plugin IDs used by the stock LMMS 1.2 series.
+const instruments = {
+  audiofileprocessor: 'Sample playback', bitinvader: 'Wavetable synthesis', carlarack: 'External plugin host',
+  carlapatchbay: 'External plugin host', gigplayer: 'GIG sampler', kicker: 'Kick drum synthesis',
+  lb302: 'Acid bass synthesis', malletsstk: 'Physical modelling', monstro: 'Subtractive and modulation synthesis',
+  nes: 'NES-style synthesis', opl2: 'FM synthesis', organic: 'Additive synthesis', papu: 'Game Boy-style synthesis',
+  patman: 'GUS patch sampler', sf2player: 'SoundFont player', sfxr: 'Retro game sound effects',
+  sid: 'SID-style synthesis', tripleoscillator: 'Three-oscillator subtractive synthesis', vestige: 'VST instrument host',
+  vibedstrings: 'Plucked string modelling', watsyn: 'Wavetable synthesis', zynaddsubfx: 'Additive and subtractive synthesis',
+};
+async function installedInstrumentIds() {
+  const entries = await readdir(pluginDirectory, { withFileTypes: true });
+  const modules = new Set(entries.filter(entry => /\.(dll|so|dylib)$/i.test(entry.name))
+    .map(entry => entry.name.toLowerCase().replace(/\.(dll|so|dylib)$/, '')));
+  return Object.keys(instruments).filter(id => modules.has(id) || modules.has('lib' + id));
+}
+tool('list_instruments', 'Discover what this installation can play: built-in voices, stock instrument plugins, preset and sample counts, effects, OGG support and Fathom bridge configuration.', {}, async () => {
+  const [plugins, factoryPresets, zyn] = await Promise.allSettled([installedInstrumentIds(), listPresets(), listZynPresets()]);
+  const worklet = process.env.LMMS_FATHOM_WORKLET;
+  return {
+    builtInVoices: [...Object.keys(tones), ...Object.keys(kit), 'sample', 'preset'],
+    nativePlugins: (plugins.value ?? []).map(id => ({ id, family: instruments[id] })),
+    pluginScan: plugins.status === 'fulfilled' ? pluginDirectory : { directory: pluginDirectory, error: plugins.reason.code },
+    factoryPresets: factoryPresets.value ?? [],
+    zynPresets: (zyn.value ?? []).length,
+    presetScan: factoryPresets.status === 'fulfilled' ? presets : { directory: presets, error: factoryPresets.reason.code },
+    samples: existsSync(samplesDirectory) ? { directory: samplesDirectory, tool: 'list_samples' } : { error: 'Sample directory not found. Set LMMS_SAMPLES.' },
+    effects: Object.keys(effectTypes), oggOutput: await hasFfmpeg(),
+    fathom: { configured: Boolean(worklet), workletFound: Boolean(worklet && existsSync(worklet)),
+      models: ['fathom', 'vesper', 'halo'], tool: 'render_fathom_track' },
+  };
+});
+edit('set_native_instrument', 'Load an installed stock LMMS instrument at its default settings. Keeps existing notes, mixer routing and track controls.', {
+  trackName: z.string(), instrument: z.enum(Object.keys(instruments)),
+}, async (doc, { trackName, instrument }) => {
+  if (!(await installedInstrumentIds()).includes(instrument)) throw new Error('Instrument plugin was not found in LMMS_PLUGINS');
+  const target = instrumentOf(doc, trackName);
+  const [previous] = children(target, 'instrument');
+  if (linked(previous)) throw new Error('Existing instrument has linked controls');
+  if (previous) target.removeChild(previous);
+  add(add(target, 'instrument', { name: instrument }), instrument);
+});
+
+// ---------- mixer, effects, automation ----------
+function mixerOf(doc) {
+  const [song] = children(doc.documentElement, 'song');
+  const mixer = children(song, 'fxmixer')[0] ?? add(song, 'fxmixer');
+  if (!children(mixer, 'fxchannel').length) add(mixer, 'fxchannel', { num: 0, name: 'Master', volume: 1, muted: 0, soloed: 0 });
+  return mixer;
+}
+function busOf(doc, name) {
+  const channels = children(mixerOf(doc), 'fxchannel');
+  const found = channels.filter(channel => channel.getAttribute('name').toLowerCase() === name.toLowerCase());
+  if (found.length !== 1) throw new Error(`Expected one mixer channel named "${name}". Channels: ${channels.map(channel => channel.getAttribute('name')).join(', ')}`);
+  return found[0];
+}
+edit('route_mixer_bus', 'Create a mixer bus sending to Master and route named instrument tracks to it, for shared effects or group level.', {
+  bus: z.string().min(1).max(80),
+  tracks: z.array(z.string()).min(1), gain: z.number().min(0).max(2).default(1),
+}, (doc, { bus, tracks: names, gain }) => {
+  const targets = names.map(name => instrumentOf(doc, name));
+  const mixer = mixerOf(doc);
+  const channels = children(mixer, 'fxchannel');
+  if (channels.some(channel => channel.getAttribute('name') === bus)) throw new Error('Mixer bus already exists');
+  const number = Math.max(...channels.map(channel => Number(channel.getAttribute('num')))) + 1;
+  const channel = add(mixer, 'fxchannel', { num: number, name: bus, volume: gain, muted: 0, soloed: 0 });
+  add(channel, 'fxchain', { numofeffects: 0, enabled: 0 });
+  add(channel, 'send', { channel: 0, amount: 1 });
+  for (const target of targets) target.setAttribute('fxch', String(number));
+});
+edit('set_bus', 'Set the gain (0-2, 1 is unity) or mute of a mixer channel, including Master.', {
+  bus: z.string().min(1).max(80), gain: z.number().min(0).max(2).optional(), mute: z.boolean().optional(),
+}, (doc, { bus, gain, mute }) => {
+  const channel = busOf(doc, bus);
+  if (gain === undefined && mute === undefined) throw new Error('Provide gain or mute');
+  if (gain !== undefined) channel.setAttribute('volume', String(gain));
+  if (mute !== undefined) channel.setAttribute('muted', mute ? '1' : '0');
+});
+const effectTarget = { trackName: z.string().optional(), bus: z.string().min(1).max(80).optional().describe('Mixer channel name, for example "Master".') };
+function chainOf(doc, { trackName, bus }, create) {
+  if (Boolean(trackName) === Boolean(bus)) throw new Error('Name exactly one of trackName or bus');
+  const owner = trackName ? instrumentOf(doc, trackName) : busOf(doc, bus);
+  return children(owner, 'fxchain')[0] ?? (create ? add(owner, 'fxchain', { numofeffects: 0, enabled: 0 }) : null);
+}
+const pluginOf = effect => {
+  const name = effect.getAttribute('name');
+  if (name !== 'ladspaeffect') return Object.keys(effectTypes).find(key => effectTypes[key].native === name) ?? name;
+  const plugin = children(children(effect, 'key')[0], 'attribute').find(attribute => attribute.getAttribute('name') === 'plugin')?.getAttribute('value');
+  return Object.keys(effectTypes).find(key => effectTypes[key].ladspa?.[1] === plugin) ?? 'ladspa:' + plugin;
+};
+tool('list_effects', 'List the effects edit_effect can add, with every parameter, its range and default.', {}, async () => describeEffects());
+tool('inspect_effects', 'Read the effect chain of an instrument track or mixer channel, including stored parameters.', { project: projectName, ...effectTarget },
+  async ({ project, ...target }) => {
+    const chain = chainOf(await load(project), target, false);
+    return chain ? children(chain, 'effect').map((effect, index) => {
+      const stored = effect.getAttribute('mcp-params');
+      return { index, plugin: pluginOf(effect), enabled: effect.getAttribute('on') !== '0', wet: Number(effect.getAttribute('wet')),
+        ...(stored ? { params: JSON.parse(stored) } : {}) };
+    }) : [];
+  });
+function writeEffect(doc, effect, plugin, params, bpm) {
+  const type = effectTypes[plugin];
+  for (const node of elements(effect)) effect.removeChild(node);
+  if (type.ladspa) {
+    if (!existsSync(path.join(pluginDirectory, 'ladspa', type.ladspa[0] + '.dll')) && !existsSync(path.join(pluginDirectory, 'ladspa', type.ladspa[0] + '.so'))) {
+      throw new Error(`${plugin} needs the LADSPA plugin ${type.ladspa[0]}, which this LMMS installation lacks`);
+    }
+    const ports = type.ports(params);
+    const controls = add(effect, 'ladspacontrols', { ports: ports.length });
+    ports.forEach((value, index) => add(controls, 'port0' + index, { data: value }));
+    const key = add(effect, 'key');
+    add(key, 'attribute', { name: 'file', value: type.ladspa[0] });
+    add(key, 'attribute', { name: 'plugin', value: type.ladspa[1] });
+  } else {
+    if (type.control) add(effect, type.control, type.attributes(params, bpm));
+    add(effect, 'key');
+  }
+  // LMMS stops an effect this many milliseconds after its input falls silent; echoes and reverbs need room to ring.
+  effect.setAttribute('autoquit', String(type.tail));
+  if (Object.keys(params).length) effect.setAttribute('mcp-params', JSON.stringify(params));
+}
+edit('edit_effect', 'Add, update or remove an effect on an instrument track or a mixer channel such as Master. Plugins: delay (tempo-synced, with feedback), reverb, compressor, limiter, amplifier, bassbooster, stereo, eq, crossovereq. See list_effects for parameters.', {
+  ...effectTarget, operation: z.enum(['add', 'update', 'remove']),
+  plugin: z.enum(Object.keys(effectTypes)).optional(), index: z.number().int().nonnegative().optional(),
+  params: z.record(z.string(), z.union([z.number(), z.string()])).optional(),
+  enabled: z.boolean().optional(), wet: z.number().min(0).max(1).optional(),
+}, (doc, { operation, plugin, index, params, enabled, wet, ...target }) => {
+  const chain = chainOf(doc, target, true);
+  const { bpm } = songInfo(doc);
+  let effect;
+  if (operation === 'add') {
+    if (!plugin) throw new Error('Choose a plugin to add');
+    effect = add(chain, 'effect', { name: effectTypes[plugin].ladspa ? 'ladspaeffect' : effectTypes[plugin].native, on: 1, wet: 1, autoquit: 1, gate: 0 });
+    try { writeEffect(doc, effect, plugin, resolveParams(plugin, params), bpm); } catch (error) { chain.removeChild(effect); throw error; }
+  } else {
+    effect = children(chain, 'effect')[index];
+    if (!effect) throw new Error('Provide an existing effect index');
+    if (operation === 'update' && params) {
+      const current = pluginOf(effect);
+      if (!(current in effectTypes)) throw new Error('This effect was not created by edit_effect; only wet and enabled can change');
+      const stored = effect.getAttribute('mcp-params');
+      writeEffect(doc, effect, current, resolveParams(current, params, stored ? JSON.parse(stored) : {}), bpm);
+    }
+  }
+  if (operation === 'remove') chain.removeChild(effect);
+  else {
+    if (enabled !== undefined) effect.setAttribute('on', enabled ? '1' : '0');
+    if (wet !== undefined) effect.setAttribute('wet', String(wet));
+  }
+  const count = children(chain, 'effect').length;
+  chain.setAttribute('numofeffects', String(count));
+  if (operation === 'add' || !count) chain.setAttribute('enabled', count ? '1' : '0');
+  return { effects: count };
+});
+const automatable = {
+  volume: { key: 'vol', range: [0, 200] }, pan: { key: 'pan', range: [-100, 100] }, pitch: { key: 'pitch', range: [-2400, 2400] },
+  cutoff: { key: 'fcut', range: [5, 14000], envelope: true }, resonance: { key: 'fres', range: [0.01, 10], envelope: true },
+};
+edit('automate_track', 'Write an editable automation clip for an instrument track control: volume, pan, pitch (cents), filter cutoff (Hz) or resonance. A control can carry several clips at different positions.', {
+  trackName: z.string(), name: z.string().min(1),
+  control: z.enum(Object.keys(automatable)), startTick: z.number().int().min(0),
+  length: z.number().int().min(1), curve: z.enum(['step', 'linear', 'smooth']).default('linear'),
+  points: z.array(z.object({ tick: z.number().int().min(0), value: z.number() })).min(2).max(4096),
+}, (doc, { trackName, name, control, startTick, length, curve, points }) => {
+  const instrument = instrumentOf(doc, trackName);
+  const { key, range: [min, max], envelope } = automatable[control];
+  const parent = envelope ? children(instrument, 'eldata')[0] : instrument;
+  if (!parent) throw new Error('Track has no filter controls');
+  if (points[0].tick !== 0 || points.some(({ tick, value }, index) =>
+    tick >= length || value < min || value > max || (index > 0 && tick <= points[index - 1].tick))) {
+    throw new Error(`Use ascending unique ticks starting at zero, below the clip length, with values from ${min} to ${max}`);
+  }
+  let [model] = children(parent, key);
+  if (!model) {
+    const used = new Set(Array.from(doc.getElementsByTagName('*')).map(node => Number(node.getAttribute('id'))));
+    let id = 10000;
+    while (used.has(id)) id++;
+    parent.removeAttribute(key);
+    model = add(parent, key, { id, value: points[0].value, scale_type: 'linear' });
+  } else if (tracks(doc).some(t => children(t, 'automationpattern').some(clip =>
+    children(clip, 'object').some(object => object.getAttribute('id') === model.getAttribute('id')) &&
+    Number(clip.getAttribute('pos')) < startTick + length && startTick < Number(clip.getAttribute('pos')) + Number(clip.getAttribute('len'))))) {
+    throw new Error('Another automation clip for this control overlaps that range');
+  }
+  if (control === 'cutoff' || control === 'resonance') {
+    parent.setAttribute('fwet', '1');
+    if (!parent.hasAttribute('ftype')) parent.setAttribute('ftype', '0');
+  }
+  const anchor = tracks(doc).find(isAnchor);
+  const automation = add(container(doc), 'track', { type: 5, name, muted: 0, solo: 0 });
+  const clip = add(automation, 'automationpattern', { name, pos: startTick, len: length, prog: { step: 0, linear: 1, smooth: 2 }[curve], tens: 1, mute: 0 });
+  for (const point of points) add(clip, 'time', { pos: point.tick, value: point.value });
+  add(clip, 'object', { id: model.getAttribute('id') });
+  if (anchor) container(doc).appendChild(anchor);
+});
+tool('inspect_arrangement', 'Read tempo, metre, song length, master volume, mixer routes, track levels, instrument types and timeline clips.', {
+  project: projectName,
+}, async ({ project }) => {
+  const doc = await load(project);
+  const info = songInfo(doc);
+  const [song] = children(doc.documentElement, 'song');
+  const [mixer] = children(song, 'fxmixer');
+  return {
+    tempo: info.bpm, meter: info.meter, lengthBars: info.lengthBars, lengthSeconds: Number(info.lengthSeconds.toFixed(4)),
+    masterVolume: Number(info.head?.getAttribute('mastervol') || 100),
+    mixer: mixer ? children(mixer, 'fxchannel').map(bus => ({
+      id: Number(bus.getAttribute('num')), name: bus.getAttribute('name'), gain: Number(bus.getAttribute('volume') || 1),
+      effects: children(children(bus, 'fxchain')[0], 'effect').length,
+      sends: children(bus, 'send').map(send => ({
+        channel: Number(send.getAttribute('channel')), amount: Number(send.getAttribute('amount')),
+      })),
+    })) : [],
+    tracks: tracks(doc).map(t => {
+      const [instrument] = children(t, 'instrumenttrack');
+      const number = key => instrument?.hasAttribute(key) ? Number(instrument.getAttribute(key)) : children(instrument, key).length ? 'automated' : undefined;
+      return {
+        name: t.getAttribute('name'), type: Number(t.getAttribute('type')),
+        ...(isAnchor(t) ? { role: 'length pin' } : {}),
+        instrument: instrument ? children(instrument, 'instrument')[0]?.getAttribute('name') ?? null : null,
+        mixerChannel: instrument ? Number(instrument.getAttribute('fxch')) : null,
+        ...(instrument ? { volume: number('vol'), pan: number('pan'), muted: t.getAttribute('muted') === '1', solo: t.getAttribute('solo') === '1',
+          effects: children(children(instrument, 'fxchain')[0], 'effect').length } : {}),
+        clips: ['pattern', 'automationpattern', 'sampletco', 'bbtco'].flatMap(tag =>
+          children(t, tag).map(clip => ({
+            type: tag, name: clip.getAttribute('name'), tick: Number(clip.getAttribute('pos')),
+            length: Number(clip.getAttribute('len')),
+            ...(tag === 'sampletco' ? { source: clip.getAttribute('src'), muted: clip.getAttribute('muted') === '1' } : {}),
+            ...(tag === 'automationpattern' ? {
+              points: children(clip, 'time').map(point => ({
+                tick: Number(point.getAttribute('pos')), value: Number(point.getAttribute('value')),
+              })),
+            } : {}),
+          }))),
+      };
+    }),
+  };
+});
+edit('set_project_tempo', 'Set a static tempo. Existing note and clip ticks stay fixed. Tempo-synced delays keep their old time until updated.', {
+  bpm: z.number().min(45).max(240),
+}, (doc, { bpm }) => {
+  const [head] = children(doc.documentElement, 'head');
+  if (!head || children(head, 'bpm').length) throw new Error('Expected a project with a static tempo');
+  head.setAttribute('bpm', String(bpm));
+});
+
 const soundName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i);
 tool('export_one_shots', 'Trim edge silence, fade and peak-match source WAVs as mono 48 kHz game sound effects.', {
   outputDirectory: soundName,
@@ -646,13 +1278,12 @@ tool('export_one_shots', 'Trim edge silence, fade and peak-match source WAVs as 
     throw error;
   }
 });
-tool('edit_clip', 'Move, duplicate, rename or remove an instrument pattern in a project copy. Positions are absolute LMMS ticks.', {
-  project: projectName, output: projectName, trackName: z.string(),
+edit('edit_clip', 'Move, duplicate, rename or remove an instrument pattern. Positions are absolute LMMS ticks.', {
+  trackName: z.string(),
   tick: z.number().int().nonnegative(),
   operation: z.enum(['move', 'duplicate', 'rename', 'remove']),
   destinationTick: z.number().int().nonnegative().optional(), name: z.string().min(1).max(100).optional(),
-}, async ({ project, output, trackName, tick, operation, destinationTick, name }) => {
-  const doc = await load(project);
+}, (doc, { trackName, tick, operation, destinationTick, name }) => {
   const target = instrumentOf(doc, trackName).parentNode;
   const patterns = children(target, 'pattern');
   const matches = patterns.filter(clip => Number(clip.getAttribute('pos')) === tick);
@@ -671,23 +1302,22 @@ tool('edit_clip', 'Move, duplicate, rename or remove an instrument pattern in a 
     clip.setAttribute('pos', String(destinationTick));
     if (name) clip.setAttribute('name', name);
   }
-  return save(doc, output);
 });
-tool('edit_sample_clip', 'Place, move, duplicate, resize, mute, relink or remove a native sample clip in a saved project copy. Positions and lengths use LMMS ticks.', {
-  project: projectName, output: projectName, trackName: z.string().min(1).max(100),
+edit('edit_sample_clip', 'Place, move, duplicate, resize, mute, relink or remove a native sample clip. Positions and lengths use LMMS ticks.', {
+  trackName: z.string().min(1).max(100),
   operation: z.enum(['place', 'move', 'duplicate', 'resize', 'mute', 'relink', 'remove']),
   tick: timelineTick, destinationTick: timelineTick.optional(), length: timelineTick.min(1).optional(),
   file: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.(wav|ogg|flac)$/i).optional(),
   muted: z.boolean().optional(),
-}, async ({ project, output, trackName, operation, tick, destinationTick, length, file, muted }) => {
+}, async (doc, { trackName, operation, tick, destinationTick, length, file, muted }) => {
+  if (trackName === anchorName) throw new Error(`"${anchorName}" is reserved for the song length pin`);
   if ((operation === 'move' || operation === 'duplicate') !== (destinationTick !== undefined) ||
       (operation === 'place' || operation === 'resize') !== (length !== undefined) ||
       (operation === 'place' || operation === 'relink') !== (file !== undefined) ||
       (operation === 'mute') !== (muted !== undefined)) {
     throw new Error('Supply destinationTick for move/duplicate, length for place/resize, file for place/relink, or muted for mute');
   }
-  const doc = await load(project);
-  const matches = tracks(doc).filter(track => track.getAttribute('type') === '2' && track.getAttribute('name') === trackName);
+  const matches = tracks(doc).filter(t => t.getAttribute('type') === '2' && t.getAttribute('name') === trackName);
   if (matches.length > 1 || (!matches.length && operation !== 'place')) throw new Error('Expected one matching sample track');
   let [target] = matches;
   const clips = children(target, 'sampletco');
@@ -710,10 +1340,7 @@ tool('edit_sample_clip', 'Place, move, duplicate, resize, mute, relink or remove
     source = filename.replaceAll('\\', '/');
   }
   if (!target) {
-    const [song] = children(doc.documentElement, 'song');
-    const [container] = children(song, 'trackcontainer');
-    if (!container) throw new Error('Expected a song track container');
-    target = add(container, 'track', { type: 2, name: trackName, muted: 0, solo: 0 });
+    target = add(container(doc), 'track', { type: 2, name: trackName, muted: 0, solo: 0 });
   }
   if (operation === 'remove') target.removeChild(original);
   if (operation === 'place') add(target, 'sampletco', { pos: tick, len: length, muted: 0, src: source });
@@ -726,86 +1353,139 @@ tool('edit_sample_clip', 'Place, move, duplicate, resize, mute, relink or remove
     original.removeAttribute('data');
     original.removeAttribute('sample_rate');
   }
-  return save(doc, output);
 });
-const effectTarget = { project: projectName, trackName: z.string() };
-tool('inspect_effects', 'Read the effect chain of one instrument track.', effectTarget,
-  async ({ project, trackName }) => {
-    const [chain] = children(instrumentOf(await load(project), trackName), 'fxchain');
-    return chain ? children(chain, 'effect').map(effect => ({
-      plugin: effect.getAttribute('name'), enabled: effect.getAttribute('on') !== '0', wet: Number(effect.getAttribute('wet')),
-    })) : [];
-  });
-tool('edit_effect', 'Add a native Delay, EQ or Crossover EQ, or edit and remove existing track effects in a project copy.', {
-  ...effectTarget, output: projectName, operation: z.enum(['add', 'update', 'remove']),
-  plugin: z.enum(['delay', 'eq', 'crossovereq']).optional(), index: z.number().int().nonnegative().optional(),
-  enabled: z.boolean().optional(), wet: z.number().min(0).max(1).optional(),
-}, async ({ project, output, trackName, operation, plugin, index, enabled, wet }) => {
+tool('apply_edits', 'Apply many edits to one project and save once. Use this for mixing passes and arrangement changes instead of one file per change. If any edit fails, nothing is written. Ops: ' + Object.keys(edits).join(', ') + '. Each edit takes the same arguments as the tool of that name, without project and output.', {
+  project: projectName, output: projectName,
+  overwrite: z.boolean().default(false).describe('Allow replacing an existing output, including the source project itself.'),
+  edits: z.array(z.object({ op: z.enum(Object.keys(edits)), args: z.record(z.string(), z.any()).default({}) })).min(1).max(400),
+}, async ({ project, output, overwrite, edits: steps }) => {
   const doc = await load(project);
-  const instrument = instrumentOf(doc, trackName);
-  const chain = children(instrument, 'fxchain')[0] ?? add(instrument, 'fxchain', { enabled: 0 });
-  if (operation === 'add' && !plugin) throw new Error('Choose a supported native plugin');
-  const effect = operation === 'add' ? add(chain, 'effect', { name: plugin, on: 1, wet: 1, autoquit: 1, gate: 0 }) :
-    children(chain, 'effect')[index];
-  if (!effect) throw new Error('Provide an existing effect index');
-  if (operation === 'remove') chain.removeChild(effect);
-  else {
-    if (enabled !== undefined) effect.setAttribute('on', enabled ? '1' : '0');
-    if (wet !== undefined) effect.setAttribute('wet', String(wet));
-  }
-  const count = children(chain, 'effect').length;
-  chain.setAttribute('numofeffects', String(count));
-  if (operation === 'add' || !count) chain.setAttribute('enabled', count ? '1' : '0');
-  return save(doc, output);
-});
-tool('render_stems', 'Render track WAVs with the installed LMMS rendertracks command into a new directory.', {
-  project: projectName, outputDirectory: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i),
-}, async ({ project, outputDirectory }) => {
-  await load(project);
-  const output = path.join(root, outputDirectory);
-  await mkdir(output);
-  const temp = await mkdtemp(path.join(root, '.stem-mix-'));
-  try {
-    const mix = path.join(temp, 'mix.wav');
-    const options = { cwd: root, timeout: 180000, windowsHide: true };
-    const args = [path.join(root, project), '-s', '48000', '-f', 'wav', '-l', '-o'];
-    await run(lmms, ['render', ...args, mix], options);
-    const reference = readPcm(await readFile(mix));
-    await run(lmms, ['rendertracks', ...args, output], options);
-    const names = (await readdir(output)).filter(name => name.toLowerCase().endsWith('.wav')).sort();
-    if (!names.length) throw new Error('LMMS returned no stem WAVs');
-    const stems = [];
-    for (const name of names) {
-      const file = path.join(output, name);
-      const original = readPcm(await readFile(file));
-      if (original.channels !== reference.channels || original.sampleRate !== reference.sampleRate) {
-        throw new Error('Stem PCM format differs from the mix');
-      }
-      const dataSize = reference.samples.length;
-      const wav = Buffer.alloc(44 + dataSize);
-      wav.write('RIFF', 0);
-      wav.writeUInt32LE(wav.length - 8, 4);
-      wav.write('WAVEfmt ', 8);
-      wav.writeUInt32LE(16, 16);
-      wav.writeUInt16LE(1, 20);
-      wav.writeUInt16LE(reference.channels, 22);
-      wav.writeUInt32LE(reference.sampleRate, 24);
-      wav.writeUInt32LE(reference.sampleRate * reference.frameBytes, 28);
-      wav.writeUInt16LE(reference.frameBytes, 32);
-      wav.writeUInt16LE(16, 34);
-      wav.write('data', 36);
-      wav.writeUInt32LE(dataSize, 40);
-      original.samples.copy(wav, 44, 0, Math.min(dataSize, original.samples.length));
-      await writeFile(file, wav);
-      stems.push({ file: name, ...measureWav(wav) });
+  const results = [];
+  for (const [index, { op, args }] of steps.entries()) {
+    try {
+      results.push({ op, ...((await edits[op].apply(doc, edits[op].schema.parse(args))) ?? {}) });
+    } catch (error) {
+      throw new Error(`Edit ${index + 1} of ${steps.length} (${op}) failed: ${explain(error)}. Nothing was written.`);
     }
-    return { directory: outputDirectory, stems };
+  }
+  return { ...(await save(doc, output, overwrite)), applied: results.length, results };
+});
+tool('resolve_chords', 'Turn chord symbols into MIDI notes with smooth voice leading, to check harmony before writing patterns.', {
+  progression: z.string().min(1).max(2000), octave: z.number().int().min(0).max(7).default(4),
+  voicing: z.enum(['close', 'open', 'spread']).default('close'),
+}, async ({ progression, octave, voicing }) => {
+  let previous;
+  return { qualities: chordQualities, chords: progression.trim().split(/[\s|]+/).filter(Boolean).map(token => {
+    const chord = parseChord(token.split(':')[0]);
+    previous = voiceChord(chord, { octave, voicing, previous });
+    return { chord: chord.symbol, notes: previous, names: previous.map(dsp.midiName), bass: bassNote(chord), bassName: dsp.midiName(bassNote(chord)) };
+  }) };
+});
+
+// ---------- game export ----------
+const sha256 = buffer => createHash('sha256').update(buffer).digest('hex');
+tool('export_game_audio', 'Export a song for a game engine in one call: a seamless loop with the tail folded in, an optional separate intro, aligned intensity layers that sum to the mix, stingers cut from bar ranges, WAV and optionally OGG files, and a manifest with loop points, loudness and checksums.', {
+  project: projectName, outputDirectory: folderName, name: folderName.describe('Base file name, for example "forest-theme".'),
+  introBars: z.number().int().min(1).max(64).optional().describe('Split this many opening bars into a one-shot intro; the loop is the rest.'),
+  layers: z.array(z.object({ name: folderName, tracks: z.array(z.string()).min(1) })).max(12).default([])
+    .describe('Adaptive music layers, each a set of track names, for example rhythm, harmony and melody.'),
+  stingers: z.array(z.object({ name: folderName, startBar: z.number().int().min(0), bars: z.number().min(0.25).max(16) })).max(16).default([]),
+  targetLufs: loudnessTarget, ceilingDb: ceilingTarget,
+  ogg: z.boolean().default(false).describe('Also write OGG Vorbis files (needs ffmpeg).'),
+}, async ({ project, outputDirectory, name, introBars, layers, stingers, targetLufs, ceilingDb, ogg }) => {
+  const doc = await load(project);
+  const info = songInfo(doc);
+  if (!info.staticTempo) throw new Error('Game export needs a static tempo');
+  if (introBars !== undefined && introBars >= info.lengthBars) throw new Error('introBars must be shorter than the song');
+  if (ogg && !(await hasFfmpeg())) throw new Error('OGG output needs ffmpeg. Install it or set LMMS_FFMPEG.');
+  const all = tracks(doc);
+  const audible = all.map((t, index) => ({ t, index })).filter(({ t }) => !isControl(t) && t.getAttribute('muted') !== '1');
+  const layerSets = layers.map(layer => new Set(layer.tracks.map(trackName => {
+    const found = audible.filter(({ t }) => t.getAttribute('name') === trackName);
+    if (found.length !== 1) throw new Error(`Layer "${layer.name}": expected one unmuted track named "${trackName}"`);
+    return found[0].index;
+  })));
+  for (const stinger of stingers) if (stinger.startBar + stinger.bars > info.lengthBars) throw new Error(`Stinger "${stinger.name}" runs past the end of the song`);
+  const destination = path.join(root, outputDirectory);
+  await mkdir(destination);
+  try {
+    const sampleRate = 48000, bar = barFrames(info, sampleRate);
+    const songFrames = Math.round(info.lengthSeconds * sampleRate), introFrames = Math.round((introBars ?? 0) * info.secondsPerBar * sampleRate);
+    const renders = await pool([null, ...layerSets], parallelRenders, set =>
+      renderDoc(set ? isolate(doc, set) : forRender(doc), { loop: false, prepared: true }).then(wav => dsp.fitLength(dsp.decodeWav(wav), songFrames + bar)));
+    const [full, ...layerAudio] = renders;
+    const loopOf = audio => dsp.foldTail(dsp.slice(audio, introFrames, audio.frames), songFrames - introFrames);
+    const loop = loopOf(full);
+    const intro = introBars ? dsp.slice(full, 0, introFrames) : null;
+    // One linear gain for every file keeps the intro, loop and layers consistent with each other.
+    let gainDb = 0;
+    const measured = dsp.loudness(loop).integratedLufs;
+    if (targetLufs !== undefined) {
+      if (measured === null) throw new Error('The loop is silent');
+      gainDb = targetLufs - measured;
+    }
+    const ceiling = ceilingDb ?? (targetLufs !== undefined ? -1 : undefined);
+    const parts = [loop, ...(intro ? [intro] : []), ...layerAudio.map(loopOf)];
+    const notes = [];
+    if (layers.length && ceiling !== undefined) {
+      // Layers must sum to the mix, so nothing is limited: hold the gain back until every file fits under the ceiling.
+      const headroom = ceiling - Math.max(...parts.map(part => dsp.db(dsp.samplePeak(part)) ?? -120));
+      if (gainDb > headroom) { notes.push(`Loudness target not reached: gain held to ${headroom.toFixed(2)} dB so the layers stay unlimited and sum to the mix.`); gainDb = headroom; }
+      if (targetLufs === undefined && headroom < 0) gainDb = headroom;
+    }
+    const gain = 10 ** (gainDb / 20);
+    const files = [];
+    const emit = async (file, audio, role, extra = {}, { limiter = false, wrap = false } = {}) => {
+      dsp.applyGain(audio, gain);
+      const limited = limiter && ceiling !== undefined ? dsp.limit(audio, ceiling, { wrap }) : null;
+      const wav = dsp.encodeWav(audio);
+      await writeFile(path.join(destination, file + '.wav'), wav, { flag: 'wx' });
+      if (ogg) await writeAudio(path.join(destination, file + '.ogg'), wav);
+      const report = dsp.analyze(audio);
+      files.push({ file: file + '.wav', ...(ogg ? { ogg: file + '.ogg' } : {}), role, ...extra, frames: audio.frames,
+        durationSeconds: report.durationSeconds, integratedLufs: report.integratedLufs, truePeakDbfs: report.truePeakDbfs,
+        peakDbfs: report.peakDbfs, clippedSamples: report.clippedSamples,
+        ...(limited?.limitedSamples ? { limiterMaxReductionDb: limited.maxReductionDb } : {}), sha256: sha256(wav) });
+      return audio;
+    };
+    const solo = !layers.length;
+    const finalLoop = await emit(`${name}-loop`, loop, 'loop', { loopStartFrame: 0, loopEndFrame: loop.frames, bars: info.lengthBars - (introBars ?? 0) }, { limiter: solo, wrap: true });
+    if (intro) await emit(`${name}-intro`, intro, 'intro', { bars: introBars, next: `${name}-loop.wav` }, { limiter: solo });
+    let residualDb;
+    if (layers.length) {
+      const sum = new Float32Array(loop.frames * 2);
+      for (const [index, layer] of layers.entries()) {
+        const audio = await emit(`${name}-layer-${layer.name}`, loopOf(layerAudio[index]), 'layer',
+          { layer: layer.name, tracks: layer.tracks, loopStartFrame: 0, loopEndFrame: loop.frames });
+        audio.channels.forEach((ch, c) => { for (let i = 0; i < ch.length; i++) sum[i * 2 + c] += ch[i]; });
+      }
+      const covered = new Set(layerSets.flatMap(set => [...set]));
+      if (audible.every(({ index }) => covered.has(index))) {
+        let error = 0, reference = 0;
+        finalLoop.channels.forEach((ch, c) => { for (let i = 0; i < ch.length; i++) { error += (sum[i * 2 + c] - ch[i]) ** 2; reference += ch[i] ** 2; } });
+        residualDb = reference > 0 && error > 0 ? Number((10 * Math.log10(error / reference)).toFixed(1)) : -120;
+        if (residualDb > -30) notes.push('The layers do not sum closely to the mix. Effects on Master or shared buses react to the combined signal; keep such effects on individual tracks for layered music.');
+      } else notes.push('Some unmuted tracks are in no layer, so the layers do not add up to the full mix.');
+    }
+    for (const stinger of stingers) {
+      const start = Math.round(stinger.startBar * info.secondsPerBar * sampleRate);
+      const end = Math.min(full.frames, start + Math.round((stinger.bars + 1) * info.secondsPerBar * sampleRate));
+      const audio = dsp.fade(dsp.slice(full, start, end), 48, Math.min(end - start, Math.round(info.secondsPerBar * sampleRate)));
+      await emit(`${name}-stinger-${stinger.name}`, audio, 'stinger', { startBar: stinger.startBar, bars: stinger.bars }, { limiter: true });
+    }
+    const manifest = { name, source: project, bpm: info.bpm, timeSignature: info.meter, bars: info.lengthBars, sampleRate, channels: 2,
+      gainDb: Number(gainDb.toFixed(2)), ...(targetLufs !== undefined ? { targetLufs } : {}), ...(ceiling !== undefined ? { ceilingDb: ceiling } : {}),
+      loop: { file: `${name}-loop.wav`, startFrame: 0, endFrame: loop.frames, seamless: true, tail: 'folded into the loop start' },
+      ...(intro ? { intro: { file: `${name}-intro.wav`, frames: intro.frames, then: `${name}-loop.wav` } } : {}),
+      ...(residualDb !== undefined ? { layersSumResidualDb: residualDb } : {}), files, ...(notes.length ? { notes } : {}) };
+    await writeFile(path.join(destination, `${name}.manifest.json`), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+    return { directory: outputDirectory, manifest: `${name}.manifest.json`, ...manifest };
   } catch (error) {
-    throw new Error('Stem render failed. Inspect the output directory before retrying: ' + error.message);
-  } finally {
-    await rm(temp, { recursive: true });
+    await rm(destination, { recursive: true, force: true }); // created by this call
+    throw error;
   }
 });
+
 tool('export_midi', 'Export instrument patterns and arranged Beat/Bassline clips as multitrack MIDI at a static tempo.', {
   project: projectName, output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
   pitchMode: z.enum(['written', 'playback']).default('written'),
@@ -997,22 +1677,4 @@ if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe
     ...clip, points, mode: z.enum(['replace', 'upsert']).optional(), progression,
   }, async args => bridgeCall('set_automation_points', args));
 }
-tool('render_mix', 'Render a 48 kHz loop WAV and report its duration, peak, full-scale samples and loop boundary jump.', {
-  project: projectName, output: wavName,
-}, async ({ project, output }) => {
-  if (existsSync(path.join(root, output))) throw new Error('Output already exists');
-  const temp = await mkdtemp(path.join(root, '.render-'));
-  try {
-    const rendered = path.join(temp, 'mix.wav');
-    await load(project);
-    await run(lmms, ['render', path.join(root, project), '-s', '48000', '-f', 'wav', '-l', '-o', rendered],
-      { cwd: root, timeout: 180000, windowsHide: true });
-    const data = await readFile(rendered);
-    const audioStats = measureWav(data);
-    await writeFile(path.join(root, output), data, { flag: 'wx' });
-    return { audio: output, bytes: data.length, ...audioStats };
-  } finally {
-    await rm(temp, { recursive: true });
-  }
-});
 await server.connect(new StdioServerTransport());
