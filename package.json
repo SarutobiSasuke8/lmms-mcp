@@ -1,0 +1,25 @@
+{
+  "name": "lmms-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "server.mjs",
+    "demo.mjs",
+    "setup-windows.ps1"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "lmms-mcp": "server.mjs"
+  },
+  "scripts": {
+    "demo": "node demo.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@xmldom/xmldom": "0.9.12",
+    "zod": "4.6.7"
+  }
+}
