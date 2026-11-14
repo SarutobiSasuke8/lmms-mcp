@@ -42,7 +42,10 @@
     "art/",
     "COMPARISON.md",
     "setup-windows.ps1",
-    "setup-vst3-windows.ps1"
+    "setup-vst3-windows.ps1",
+    "setup-libraries-windows.ps1",
+    "sampler/",
+    "!sampler/test_*.py"
   ],
   "engines": {
     "node": ">=22"

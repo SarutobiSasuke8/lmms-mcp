@@ -267,7 +267,7 @@ function createSong(bpm, items, mastervol = 86) {
 }
 const profileId = z.enum(Object.keys(composerProfiles));
 const externalInstruments = {
-  'decent-sampler': { env: 'LMMS_DECENT_SAMPLER_VST3', url: 'https://store.decentsamples.com/downloads/decent-sampler/versions', use: 'Sample libraries. Load a library in a VST3 host and save a VST3 preset.' },
+  'decent-sampler': { env: 'LMMS_DECENT_SAMPLER_VST3', url: 'https://store.decentsamples.com/downloads/decent-sampler/versions', use: 'Sample libraries. Convert an SFZ library with convert_sfz and pass the .dspreset, or save a VST3 preset from a host.' },
   'surge-xt': { env: 'LMMS_SURGE_XT_VST3', url: 'https://surge-synthesizer.github.io/downloads/', use: 'Synth patches for pads, leads and bass.' },
 };
 const vstWorker = new URL('./vst3-render.py', import.meta.url);
@@ -306,6 +306,8 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
     name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
     instrument: z.enum(Object.keys(externalInstruments)),
     preset: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.vstpreset$/i).optional(),
+    dspreset: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.dspreset$/i).optional()
+      .describe('A Decent Sampler preset in the workspace, for example from convert_sfz. Use instead of preset; instrument must be decent-sampler.'),
     parameters: z.record(z.string().max(120), z.number().min(0).max(1)).default({}),
     gainDb: z.number().min(-60).max(12).default(0),
   })).min(1).max(8),
@@ -321,12 +323,19 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
   for (const track of tracks) {
     const plugin = process.env[externalInstruments[track.instrument].env];
     if (!plugin || !existsSync(plugin)) throw new Error('Configure ' + externalInstruments[track.instrument].env);
+    if (track.preset && track.dspreset) throw new Error("Use preset or dspreset, not both");
+    if (track.dspreset && track.instrument !== "decent-sampler") throw new Error("dspreset needs the decent-sampler instrument");
     const preset = track.preset && path.join(root, track.preset);
+    const dspreset = track.dspreset && path.join(root, track.dspreset);
+    if (dspreset) {
+      const info = await lstat(dspreset);
+      if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new Error("Expected a workspace .dspreset up to 8 MiB");
+    }
     if (preset) {
       const info = await lstat(preset);
       if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error('Expected a workspace VST3 preset up to 16 MiB');
     }
-    assignments.push({ ...track, plugin, preset });
+    assignments.push({ ...track, plugin, preset, dspreset });
   }
   const directory = path.join(root, outputDirectory);
   const frames = Math.round(durationSeconds * 48000);
@@ -334,7 +343,7 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
   const request = path.join(directory, '.render.json');
   try {
     await writeFile(request, JSON.stringify({ midi: midiPath, directory, frames, tracks: assignments }), { flag: 'wx' });
-    const { stdout } = await run(python, [fileURLToPath(vstWorker), request], { timeout: 240000, windowsHide: true });
+    const { stdout } = await run(python, [fileURLToPath(vstWorker), request], { timeout: 590000, windowsHide: true });
     const { sharedGain } = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
     const stems = [];
     for (const filename of [...tracks.map(track => track.name + '.wav'), 'mix.wav']) {
