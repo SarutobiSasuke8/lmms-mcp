@@ -26,3 +26,9 @@ Our adapter changed a live track name and clip name, replaced a clip's notes and
 For Beat/Bassline parity, both servers exported the same pitches and onsets for 16 kick and 16 clap steps in Jx9x's crunk-demo fixture, plus 56 melodic notes. Ours emitted quarter-beat gates for the drum steps. Jx9x's native export produced longer gates on that fixture. Saved-project MIDI currently requires non-overlapping Beat/Bassline clips within each arrangement track.
 
 Both servers created a native automation track, linked a clip to Bass volume and read back linear points at tick 0 / 40% and tick 48 / 72% after an upsert. Our adapter also loaded an AnalogBell preset and a one-shot Ogg into newly created live tracks. Jx9x retains broader native parameter discovery, automation binding and live arrangement controls.
+
+## v0.5.0 and sound catalogue
+
+v0.5.0 adds stock instrument discovery and swapping, batch game one-shot processing, and a Fathom Synth offline render with editable LMMS source notes. The catalogue branch adds searchable patch selection and audition WAVs for supported factory presets and Fathom patches.
+
+We have verified the stock LMMS workflow, including the Fathom ladder sweep and aligned stems, on Windows. Jx9x documents broader live parameter editing and additional audio formats. ZipseLu documents broader saved-project editing for sample clips, effects and newer LMMS instruments. Those workflows need equivalent fixtures and current-version tests before making an overall ranking.
