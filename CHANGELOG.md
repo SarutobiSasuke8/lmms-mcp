@@ -13,6 +13,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `export_game_audio` manifest now includes an additive `engines` section with Phaser 3 and Godot 4 loadable format hints: loop points, layers with intensity, and short example loader snippets. Existing consumers ignore the new key.
+
 - `convert_sfz` now keeps keyswitched articulations (`sw_last` / `sw_lokey` ranges) as switchable Decent Sampler groups instead of discarding non-default ones. Legato and vibrato (CC1/LFO) hints are preserved where present. `render_vst3_stems` already passes keyswitch notes and CCs from the MIDI.
 
 

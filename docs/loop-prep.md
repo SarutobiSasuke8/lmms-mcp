@@ -82,3 +82,14 @@ Checking that you have the right to use, edit and ship any audio you did not mak
 
 - `tools/loop-prep.test.mjs` (run by `npm test`): tempo detection from 64 to 200 bpm with half and double tempo flagged (clicks at 160, 174, 180 and 200 bpm, eighth notes at 70 bpm), a hint 0.33% off the real tempo, loop finding on synthetic songs with a non-repeating intro, a repeated phrase and a ring-out ending at 48 kHz and 44.1 kHz (length to within one frame, start to within 12 ms), a loop that runs to the end of the file, slightly different repeats (matched to the sample) and loose repeats (beat grid, and a person is asked), the longest-equal-loop rule, ranks that do not depend on `count`, refusal on beatless noise, length refinement and its correlation floor, linear and equal-power fade maths and the level through each fade, both crossfade directions, the quiet-point shift, and the decoding errors and temporary folder.
 - `verify-loop-prep.mjs` (needs LMMS): builds a project with a two-bar intro, a four-bar section played twice and an ending, renders it with its tail, and checks over stdio that the loop length matches four bars to within 3 ms, that the prepared loop has a boundary jump below -40 dBFS, meets a -16 LUFS target and is marked seamless, that checksums match and the intro joins the loop cleanly. It repeats the search on a version whose second pass is quieter and whose lead has reverb, so the two passes differ. It also checks fold with explicit times, a plain cut reported as not seamless, a 44.1 kHz copy and an MP3 copy (when ffmpeg is installed) with no temporary folder left behind, that low confidence refuses to guess, and that forcing it marks the loop as not seamless.
+
+
+## Game engine helpers
+
+The manifest written by `export_game_audio` includes an additive `engines` object with Phaser 3 and Godot 4 hints:
+
+- `loopPoints` — start/end frames and seamless flag
+- `layers` — each layer name, file and intensity index
+- `example` — a short loader snippet for the engine
+
+Existing tools and games that only read the original keys are unaffected.

@@ -1703,7 +1703,22 @@ tool('export_game_audio', 'Export a song for a game engine in one call: a seamle
       gainDb: Number(gainDb.toFixed(2)), ...(targetLufs !== undefined ? { targetLufs } : {}), ...(ceiling !== undefined ? { ceilingDb: ceiling } : {}),
       loop: { file: `${name}-loop.wav`, startFrame: 0, endFrame: loop.frames, seamless, tail: 'folded into the loop start', ...(hasLoopClick ? { seamIssues: ['analyze_audio warned of a loop click'] } : {}) },
       ...(intro ? { intro: { file: `${name}-intro.wav`, frames: intro.frames, then: `${name}-loop.wav` } } : {}),
-      ...(residualDb !== undefined ? { layersSumResidualDb: residualDb } : {}), files, ...(notes.length ? { notes } : {}) };
+      ...(residualDb !== undefined ? { layersSumResidualDb: residualDb } : {}), files, ...(notes.length ? { notes } : {}),
+      // Additive game-engine helpers (Phaser 3 / Godot 4). Existing consumers ignore unknown keys.
+      engines: {
+        phaser3: {
+          loopPoints: { startFrame: 0, endFrame: loop.frames, seamless },
+          layers: layers.map((layer, i) => ({ name: layer.name, file: `${name}-layer-${layer.name}.wav`, intensity: i })),
+          intensitySwitch: "this.sound.play(layerFile); // or use a SoundManager with multiple tracks",
+          example: `// Phaser 3 loader snippet\nthis.load.audio('${name}-loop', '${name}-loop.wav');\n// Play looped; switch intensity by starting/stopping layer tracks`
+        },
+        godot4: {
+          loopPoints: { startFrame: 0, endFrame: loop.frames, seamless },
+          layers: layers.map((layer, i) => ({ name: layer.name, file: `${name}-layer-${layer.name}.wav`, intensity: i })),
+          intensitySwitch: "AudioStreamPlayer.stream = load(layer_path); player.play()",
+          example: `# Godot 4 loader snippet\nvar stream = AudioStreamWAV.new()\nstream.data = FileAccess.get_file_as_bytes("${name}-loop.wav")\n# Assign to AudioStreamPlayer; switch intensity by swapping streams or using AudioStreamPolyphonic`
+        }
+      } };
     await writeFile(path.join(destination, `${name}.manifest.json`), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
     return { directory: outputDirectory, manifest: `${name}.manifest.json`, ...manifest, ...checks };
   } catch (error) {
