@@ -6,7 +6,10 @@ Sample paths are written relative to --root (default: the sfz folder), or absolu
 Handles #define, #include, <control>/<global>/<master>/<group>/<region> inheritance, default_path,
 key names, velocity ranges, loops, offsets, tuning, volume, pan, ampeg, round robin (seq_*), and
 keeps only regions whose cc/keyswitch conditions hold at the SFZ's default controller values.
-Skipped: trigger=release, keyswitched articulations, cc-gated layers, LFOs, filters and effects.
+A keyswitched library keeps its default articulation (sw_default). Skipped: trigger=release, other keyswitched\narticulations, cc-gated and cc-triggered layers, LFOs, filters and effects.
+*_onccN modulation of envelopes, volume, pan, tune, offset and velocity tracking is applied at the default
+controller values, with the standard SFZ curves 0 to 6. With --keep-releases, release samples become Decent
+Sampler release groups.
 """
 import re, sys, os, argparse
 from xml.sax.saxutils import quoteattr
@@ -37,6 +40,7 @@ def key(v):
 
 
 def preprocess(path, defines, depth=0, main_dir=None):
+    """Expand #define and #include, in order. Both may appear anywhere on a line, and a later #define replaces an earlier one."""
     if depth > 12:
         raise RuntimeError("include depth")
     out = []
@@ -45,6 +49,13 @@ def preprocess(path, defines, depth=0, main_dir=None):
     with open(path, encoding="utf-8", errors="replace") as handle:
         text = handle.read()
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+
+    def substitute(value):
+        for name in sorted(defines, key=len, reverse=True):
+            if name in value:
+                value = value.replace(name, defines[name])
+        return value
+
     for line in text.splitlines():
         line = re.sub(r"//.*$", "", line).rstrip()
         s = line.strip()
@@ -54,22 +65,19 @@ def preprocess(path, defines, depth=0, main_dir=None):
             parts = s.split(None, 2)
             defines[parts[1]] = parts[2].strip() if len(parts) > 2 else ""
             continue
-        if s.startswith("#include"):
-            for name in sorted(defines, key=len, reverse=True):
-                s = s.replace(name, defines[name])
-            m = re.search(r'"([^"]+)"', s)
-            rel = m.group(1).replace("\\", "/")
+        pieces = re.split(r'#include\s+"([^"]+)"', line)  # text, path, text, path, ...
+        for index, piece in enumerate(pieces):
+            if index % 2 == 0:
+                if piece.strip():
+                    out.append(substitute(piece))
+                continue
+            rel = substitute(piece).replace("\\", "/")
             inc = os.path.normpath(os.path.join(main_dir, rel))  # SFZ spec: relative to the main file
             if not os.path.exists(inc):
                 inc = os.path.normpath(os.path.join(base, rel))
             if not inside(inc):
                 raise ValueError(f"#include outside the library folder: {rel}")
             out.extend(preprocess(inc, defines, depth + 1, main_dir))
-            continue
-        for name in sorted(defines, key=len, reverse=True):
-            if name in line:
-                line = line.replace(name, defines[name])
-        out.append(line)
     return out
 
 
@@ -119,7 +127,20 @@ def parse(path):
 def active(r, cc, keep_releases):
     if not keep_releases and r.get("trigger", "attack") in ("release", "release_key"):
         return False
-    if "sw_last" in r or "sw_previous" in r or "sw_up" in r or "sw_down" in r:
+    if "sw_previous" in r or "sw_up" in r or "sw_down" in r:
+        return False
+    if "sw_last" in r:  # keep the articulation that is selected when nothing has been switched
+        try:
+            if "sw_default" not in r or key(r["sw_last"]) != key(r["sw_default"]):
+                return False
+        except ValueError:
+            return False
+    if any(re.fullmatch(r"on_(lo|hi)(hd)?cc\d+", k) for k in r):  # played by a controller, such as pedal noise
+        return False
+    try:
+        if "hikey" in r and key(r["hikey"]) < 0:  # hikey=-1 means the region is never played from the keyboard
+            return False
+    except ValueError:
         return False
     for k, v in r.items():
         m = re.fullmatch(r"(lo|hi)cc(\d+)", k)
@@ -143,8 +164,30 @@ def active(r, cc, keep_releases):
     return True
 
 
+MODULATED = {"ampeg_attack": 0.0, "ampeg_decay": 0.0, "ampeg_sustain": 100.0, "ampeg_release": 0.05,
+             "amp_veltrack": 100.0, "volume": 0.0, "pan": 0.0, "tune": 0.0, "offset": 0.0}
+# The standard SFZ controller curves 0 to 6. Custom <curve> headers fall back to linear.
+CURVES = {0: lambda x: x, 1: lambda x: 2 * x - 1, 2: lambda x: 1 - x, 3: lambda x: 1 - 2 * x,
+          4: lambda x: x * x, 5: lambda x: x ** 0.5, 6: lambda x: (1 - x) ** 0.5}
+
+
+def apply_cc_defaults(r, cc):
+    """Fold *_onccN modulation into the base opcode at the default controller values."""
+    out = dict(r)
+    for k, v in r.items():
+        m = re.fullmatch(r"(\w+?)_on(hd)?cc(\d+)", k)
+        if not m or m.group(1) not in MODULATED:
+            continue
+        base, number = m.group(1), int(m.group(3))
+        x = cc.get(number, 0) / 127
+        curve = int(float(r.get(f"{base}_curvecc{number}", 0)))
+        out[base] = str(float(out.get(base, MODULATED[base])) + float(v) * CURVES.get(curve, CURVES[0])(x))
+    return out
+
+
 def convert(sfz, root, absolute, keep_releases, only):
     control, regions, cc = parse(sfz)
+    regions = [apply_cc_defaults(r, cc) for r in regions]
     default_path = control.get("default_path", "").replace("\\", "/")
     sfz_dir = os.path.dirname(sfz)
     groups, skipped, missing = {}, 0, []
@@ -189,14 +232,16 @@ def convert(sfz, root, absolute, keep_releases, only):
             attrs.update(seqMode="round_robin", seqLength=int(r["seq_length"]), seqPosition=int(r.get("seq_position", 1)))
         g = {"attack": float(r.get("ampeg_attack", 0)), "decay": float(r.get("ampeg_decay", 0.0)),
              "sustain": float(r.get("ampeg_sustain", 100)) / 100, "release": max(float(r.get("ampeg_release", 0.05)), 0.01),
-             "ampVelTrack": float(r.get("amp_veltrack", 100)) / 100}
+             "ampVelTrack": max(0.0, min(1.0, float(r.get("amp_veltrack", 100)) / 100)),
+             "trigger": "release" if r.get("trigger") in ("release", "release_key") else "attack"}
         if g["decay"] > 30:
             g["decay"] = 30.0
         groups.setdefault(tuple(sorted(g.items())), []).append(attrs)
     xml = []
     count = 0
     for gk, samples in groups.items():
-        gattrs = " ".join(f"{k}={quoteattr(str(round(v, 4)))}" for k, v in gk)
+        gattrs = " ".join(f"{k}={quoteattr(str(round(v, 4) if isinstance(v, float) else v))}"
+                          for k, v in gk if not (k == "trigger" and v == "attack"))
         xml.append(f"    <group {gattrs}>")
         for a in samples:
             xml.append("      <sample " + " ".join(f"{k}={quoteattr(str(v))}" for k, v in a.items()) + "/>")

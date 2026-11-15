@@ -6,9 +6,9 @@ Write game music with an AI agent and get engine-ready files back. The agent com
 
 ## Windows setup
 
-Install Node.js 22 or newer. From a checkout run `./setup-windows.ps1`. It installs the Node dependencies and uses WinGet to install stock LMMS 1.2.2 if needed. For manual setup, run `npm ci` and install [LMMS](https://lmms.io/download). The package contains our server and demo, and setup obtains LMMS from its official distribution.
+Install Node.js 20 or newer. From a checkout run `./setup-windows.ps1`. It installs the Node dependencies and uses WinGet to install stock LMMS 1.2.2 if needed. For manual setup, run `npm ci` and install [LMMS](https://lmms.io/download). The package contains our server and demo, and setup obtains LMMS from its official distribution.
 
-Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. The tested combination is Node.js 22 and LMMS 1.2.2 on Windows x64.
+Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. The package requires Node.js 20 or newer. It is tested with LMMS 1.2.2 on Windows x64; CI uses Node.js 22, and the server and unit tests also pass on Node.js 20.
 
 | Variable | Purpose |
 | --- | --- |
@@ -20,7 +20,7 @@ Configure a stdio MCP client with command `node` and the absolute path to `serve
 | `LMMS_PARALLEL_RENDERS` | Renders run side by side for stems and layers (1 to 4, default 3) |
 | `LMMS_SAMPLE_LIBRARIES` | Folder of open SFZ libraries for `convert_sfz` (optional, see [docs/sampler.md](docs/sampler.md)) |
 
-To run the published package, use `npx -y @sarutobi-sasuke/lmms-mcp`. For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.9.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
+To run the published package, use `npx -y @sarutobi-sasuke/lmms-mcp`. For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.9.1.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
 
 On connection, the server sends a short workflow brief through MCP initialization. Call `get_started` for the same guidance, workflow entry points and local configuration. The MCP tool list documents exact parameters, including optional live tools when configured.
 
@@ -45,7 +45,7 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio` |
 | Scores and performance | `import_midi`, `shape_performance`, `master_audio` ([docs/midi-import.md](docs/midi-import.md)) |
 | Phrase library | `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase`, `rate_phrase` ([docs/phrases.md](docs/phrases.md)) |
-| Browse sounds | `build_library_page`, `build_library_previews` |
+| Browse sounds | `build_library_page`, `build_library_previews`, `tag_sound`, `list_tagged` ([docs/sound-library.md](docs/sound-library.md)) |
 | See a song | `build_timeline_page` ([docs/timeline.md](docs/timeline.md)) |
 | Check | `set_track_role`, `lint_arrangement`, `quality_report` ([docs/arranger-lint.md](docs/arranger-lint.md)) |
 | Balance | `auto_balance`, `compare_to_reference` ([docs/balance.md](docs/balance.md)) |
@@ -193,6 +193,14 @@ Save a full Fathom patch object as JSON in the workspace. Supported model IDs ar
 The bridge uses the written pitches, note lengths and velocities. It interpolates cutoff by frequency ratio and updates the worklet every 128 samples. The project copy keeps the muted source piano-roll track for editing and MIDI export and plays the rendered audio from a sample track. Rerun after editing notes, tempo, patch or cutoff, with fresh output filenames. The current bridge renders the dry worklet. Add delay and reverb with `edit_effect`. The audio clip references an absolute WAV path, so relink it when moving the project.
 
 `search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
+
+## Optional Atelier groovebox tools
+
+Link a local checkout of the private Atelier DSP engine with `npm link atelier-dsp` after registering the checkout with `npm link`, or set `LMMS_ATELIER_DSP` to the absolute path to its repository root. Use a branch that contains `src/groovebox/index.js`. The LMMS MCP server starts without the engine, and the groovebox tools report the local setup needed when called without it.
+
+- `groovebox_pattern` builds a 16-step project with per-hit velocity and a synth bass lane with accent and slide.
+- `load_pad_kit` validates a kit JSON file in `LMMS_WORKSPACE` and returns its pad data.
+- `render_groovebox` writes a new stereo WAV or MIDI file in `LMMS_WORKSPACE`. For sampler pads, pass a map from each pad's asset ID to the workspace WAV file.
 
 ## External VST3 instruments
 

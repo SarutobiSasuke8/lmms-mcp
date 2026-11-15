@@ -1,6 +1,6 @@
 {
   "name": "@sarutobi-sasuke/lmms-mcp",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "MCP server that lets an AI agent compose, mix, measure and export game music with stock LMMS 1.2.2",
   "keywords": [
     "mcp",
@@ -51,10 +51,13 @@
     "setup-libraries-windows.ps1",
     "CHANGELOG.md",
     "sampler/",
-    "!sampler/test_*.py"
+    "!sampler/test_*.py",
+    "!**/__pycache__",
+    "!**/*.pyc",
+    "!**/*.pyo"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "bin": {
     "lmms-mcp": "server.mjs",
@@ -62,7 +65,7 @@
   },
   "scripts": {
     "demo": "node demo.mjs",
-    "test": "node --test test.mjs \"tools/*.test.mjs\"",
+    "test": "node .github/scripts/run-tests.mjs",
     "verify": "node verify-exports.mjs && node verify-game-audio.mjs"
   },
   "dependencies": {

@@ -102,6 +102,11 @@ test('accompaniment follows the chords, stays low and holds the pedal', () => {
       assert.ok(note.midi >= 36 && note.midi <= 67 + 12, `${style}: ${note.midi}`);
       assert.ok(note.tick + note.length <= 16 * 192 && note.length >= 6);
     }
+    if (['skank', 'bubble'].includes(style)) { // off-beat styles leave the beat to the bass and drums
+      const chords = notes.filter(note => note.length >= 14 && note.tick < 15 * 192); // the last bar is a held chord
+      assert.ok(chords.length >= 15 * 4 * 2 && chords.every(note => note.tick % 48 === 24), `${style}: chords must sit on the off-beats`);
+      continue;
+    }
     const downbeats = notes.filter(note => note.tick % 192 === 0);
     const lowest = bar => Math.min(...downbeats.filter(note => note.tick === bar * 192).map(note => note.midi));
     for (let bar = 0; bar < 16; bar++) assert.equal(mod(lowest(bar), 12), plan[bar][0].root, `${style}: bar ${bar} bass is not the root`);
