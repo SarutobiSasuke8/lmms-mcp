@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile, writeFile, lstat, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { workspaceMeta, applyMeta, audioSeconds, baseOf, facets } from './sound-meta.mjs';
 
 const audioFile = /\.(ogg|wav|flac|mp3)$/i;
 // What a sample probably is, from the words in its path. First match wins.
@@ -58,10 +59,10 @@ export function classifyWorkspace(relative) {
   return { type: 'workspace', source: 'Workspace: ' + parts[0] };
 }
 // The audition (mixer) page that belongs to a render, if one was built: "song-club.wav" finds "song-audition.html".
-export function auditionFor(relative, pages) {
+export function auditionFor(relative, pages, suffix = '-audition.html') {
   let name = relative.split('/')[0].replace(/\.[^.]+$/, '');
   for (;;) {
-    if (pages.has(name + '-audition.html')) return name + '-audition.html';
+    if (pages.has(name + suffix)) return name + suffix;
     const cut = name.lastIndexOf('-');
     if (cut <= 0) return null;
     name = name.slice(0, cut);
@@ -127,7 +128,7 @@ export function tidyPreview(audio, { floorDb = -60, padSeconds = 0.08 } = {}) {
 const lineSeparators = new RegExp(String.fromCharCode(91, 0x2028, 0x2029, 93), 'g');
 const escapeForScript = text => text.replace(/</g, '\\u003c').replace(lineSeparators, c => '\\u' + c.charCodeAt(0).toString(16));
 export function browserHtml({ title, items, generated, notes = [] }) {
-  const data = escapeForScript(JSON.stringify({ items, generated, notes }));
+  const data = escapeForScript(JSON.stringify({ items, generated, notes, facets }));
   const safeTitle = title.replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -166,6 +167,9 @@ footer .now{flex:1 1 200px;min-width:0;overflow:hidden;text-overflow:ellipsis;wh
 a.open{font-size:12.5px;color:var(--accent)}
 .more{margin:14px auto;display:block}.empty{color:var(--muted);padding:40px 0;text-align:center}
 .note{color:var(--muted);font-size:12.5px;margin:6px 0 0}
+[hidden]{display:none!important}.facets{margin-top:8px}.facets select{padding:5px 8px;font-size:13.5px;max-width:220px}
+details.src{font-size:12.5px;margin-top:2px}details.src summary{cursor:pointer;color:var(--accent)}details.src pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.45 ui-monospace,Consolas,monospace;background:var(--chip);border-radius:6px;padding:8px;margin:4px 0;max-height:260px;overflow:auto}
+.chip.lic{background:transparent;border:1px dashed var(--line)}
 @media (max-width:760px){.item{grid-template-columns:40px minmax(0,1fr) 34px}.item .meta,.item .viz{grid-column:2/3}.viz svg{width:100%}}
 </style></head><body>
 <header>
@@ -174,7 +178,7 @@ a.open{font-size:12.5px;color:var(--accent)}
 <select id="source"><option value="">All sources</option></select><select id="role"><option value="">All roles</option></select>
 <select id="sort"><option value="name">Sort: name</option><option value="source">Sort: source</option><option value="bright">Sort: brightest first</option><option value="rating">Sort: best rated</option><option value="newest">Sort: newest first</option></select>
 <button id="playable" type="button">Playable only</button><button id="starred" type="button">★ Picks only</button><button id="clear" type="button">Clear filters</button><span class="count" id="count"></span></div>
-<div class="row types" id="types"></div><div class="tags" id="tags"></div>
+<div class="row types" id="types"></div><div class="row facets" id="facets" hidden></div><div class="tags" id="tags"></div>
 </header>
 <main><div id="list"></div><button class="more" id="more" type="button" hidden>Show more</button><p class="note" id="notes"></p></main>
 <footer><div class="wave" id="wave" hidden></div>
@@ -187,12 +191,15 @@ a.open{font-size:12.5px;color:var(--accent)}
 <script>
 (function(){
 var D=JSON.parse(document.getElementById('data').textContent),items=D.items,$=function(id){return document.getElementById(id)};
-var typeNames={track:'My tracks',stem:'Stems',preset:'Synth presets',stock:'LMMS samples',workspace:'Workspace samples',library:'Library samples',phrase:'Phrases'};
-var state={types:{},tags:{},q:'',source:'',role:'',sort:'name',playable:false,starred:false,shown:150,sel:-1},stars={};
+var typeNames={piece:'Finished pieces',track:'My tracks',stem:'Stems',preset:'Synth presets',stock:'LMMS samples',workspace:'Workspace samples',library:'Library samples',phrase:'Phrases'};
+var state={types:{},tags:{},f:{},q:'',source:'',role:'',sort:'name',playable:false,starred:false,shown:150,sel:-1},stars={};
+var facetList=(D.facets||[]).filter(function(f){return items.some(function(it){return it.z&&it.z[f[0]]})}),facetSel={};
+facetList.forEach(function(f){var s=document.createElement('select');s.setAttribute('aria-label',f[1]);s.dataset.facet=f[0];s.onchange=function(){state.f[f[0]]=this.value;refresh(true)};facetSel[f[0]]=s;$('facets').appendChild(s)});
+$('facets').hidden=!facetList.length;
 try{stars=JSON.parse(localStorage.getItem('lmms-library-picks')||'{}')}catch(e){}
 function save(){try{localStorage.setItem('lmms-library-picks',JSON.stringify(stars))}catch(e){}}
 function key(it){return it.t+':'+it.p}
-items.forEach(function(it,i){it.i=i;it.h=(it.n+' '+it.p+' '+it.s+' '+it.c+' '+it.r+' '+(it.g||[]).join(' ')+' '+(it.d||'')).toLowerCase()});
+items.forEach(function(it,i){var zs=[];for(var k in (it.z||{}))zs=zs.concat(it.z[k]);it.i=i;it.h=(it.n+' '+it.p+' '+it.s+' '+it.c+' '+it.r+' '+(it.g||[]).join(' ')+' '+zs.join(' ')+' '+(it.d||'')).toLowerCase()});
 var typesPresent=Object.keys(typeNames).filter(function(t){return items.some(function(it){return it.t===t})});
 typesPresent.forEach(function(t){var b=document.createElement('button');b.type='button';b.textContent=typeNames[t]+' ('+items.filter(function(it){return it.t===t}).length+')';
   b.onclick=function(){state.types[t]=!state.types[t];b.classList.toggle('on',state.types[t]);refresh(true)};$('types').appendChild(b)});
@@ -203,6 +210,7 @@ function matches(it,skip){
   if(anyType&&!state.types[it.t])return false;
   if(skip!=='source'&&state.source&&it.s!==state.source)return false;
   if(skip!=='role'&&state.role&&it.r!==state.role)return false;
+  for(var fk in state.f)if(state.f[fk]&&skip!==fk&&((it.z&&it.z[fk])||[]).indexOf(state.f[fk])<0)return false;
   if(state.playable&&!it.u)return false;
   if(state.starred&&!stars[key(it)])return false;
   if(skip!=='tags'){for(var t in state.tags)if(state.tags[t]&&(it.g||[]).indexOf(t)<0)return false}
@@ -213,6 +221,7 @@ function refresh(reset){
   if(reset){state.shown=150;state.sel=-1}
   var changed=fillSelect($('source'),tally(items.filter(function(it){return matches(it,'source')}),function(it){return it.s}),'All sources');if(changed)state.source='';
   changed=fillSelect($('role'),tally(items.filter(function(it){return matches(it,'role')}),function(it){return it.r}),'All roles');if(changed)state.role='';
+  facetList.forEach(function(f){if(fillSelect(facetSel[f[0]],tally(items.filter(function(it){return matches(it,f[0])}),function(it){return (it.z&&it.z[f[0]])||[]}),f[1]))state.f[f[0]]=''});
   var tagList=tally(items.filter(function(it){return matches(it,'tags')}),function(it){return it.g||[]}).slice(0,40),box=$('tags');box.innerHTML='';
   tagList.forEach(function(v){var b=document.createElement('button');b.type='button';b.textContent=v[0]+' '+v[1];b.className=state.tags[v[0]]?'on':'';b.onclick=function(){state.tags[v[0]]=!state.tags[v[0]];refresh(true)};box.appendChild(b)});
   current=items.filter(function(it){return matches(it)});
@@ -244,8 +253,11 @@ function draw(){
     var row=el('div','item'+(index===state.sel?' sel':''));row.dataset.index=index;
     var play=el('button','play',it.u?'▶':'–');play.type='button';play.disabled=!it.u;play.title=it.u?'Listen':'No audio for this item yet';play.onclick=function(){select(index,true)};row.appendChild(play);
     var text=el('div');text.appendChild(el('div','name',it.n));text.appendChild(el('div','path',it.t==='phrase'?it.p:(it.s+(it.c?' / '+it.c:''))));if(it.d)text.appendChild(el('div','desc',it.d));
-    if(it.a){var link=el('a','open','Open mixer page (layers, sections, feedback)');link.href=it.a;link.target='_blank';link.rel='noopener';text.appendChild(link)}row.appendChild(text);
-    var meta=el('div','meta');meta.appendChild(el('span','chip role',it.r));(it.g||[]).slice(0,5).forEach(function(g){meta.appendChild(el('span','chip',g))});
+    if(it.a){var link=el('a','open','Open mixer page (layers, sections, feedback)');link.href=it.a;link.target='_blank';link.rel='noopener';text.appendChild(link)}
+    if(it.y){var tl=el('a','open','Open timeline (stems as lanes)');tl.href=it.y;tl.target='_blank';tl.rel='noopener';tl.style.marginRight='12px';text.insertBefore(tl,text.querySelector('a.open'))}
+    if(it.su&&/^https?:/.test(it.su)){var sl=el('a','open','Score or source');sl.href=it.su;sl.target='_blank';sl.rel='noopener noreferrer';sl.style.marginRight='12px';text.appendChild(sl)}
+    if(it.sn){var det=el('details','src');det.appendChild(el('summary','','Source note'+(it.sp?' ('+it.sp+')':'')));det.appendChild(el('pre','',it.sn));text.appendChild(det)}row.appendChild(text);
+    var meta=el('div','meta');meta.appendChild(el('span','chip role',it.r));var z=it.z||{};[].concat(z.era||[],z.genre||[],z.gameUse||[]).slice(0,5).forEach(function(g){meta.appendChild(el('span','chip',g))});(z.licence||[]).forEach(function(g){meta.appendChild(el('span','chip lic',g))});(it.g||[]).slice(0,it.z?3:5).forEach(function(g){meta.appendChild(el('span','chip',g))});
     if(it.l)meta.appendChild(el('span','chip',fmt(it.l)));
     if(it.k)meta.appendChild(el('span','chip','rated '+it.k+'/5'));if(it.x)meta.appendChild(el('span','chip','used '+it.x+'×'));row.appendChild(meta);
     row.appendChild(viz(it));
@@ -273,7 +285,7 @@ $('wave').onclick=function(e){var r=this.getBoundingClientRect();seekTo((e.clien
 $('loop').onclick=function(){audio.loop=!audio.loop;this.classList.toggle('on',audio.loop)};
 $('auto').onclick=function(){state.auto=!state.auto;this.classList.toggle('on',state.auto)};
 $('vol').oninput=function(){audio.volume=this.value/100};
-$('clear').onclick=function(){state.types={};state.tags={};state.q='';state.source='';state.role='';state.playable=false;state.starred=false;$('q').value='';
+$('clear').onclick=function(){state.types={};state.tags={};state.f={};facetList.forEach(function(f){facetSel[f[0]].value=''});state.q='';state.source='';state.role='';state.playable=false;state.starred=false;$('q').value='';
   ['playable','starred'].forEach(function(id){$(id).classList.remove('on')});[].forEach.call($('types').children,function(b){b.classList.remove('on')});refresh(true)};
 $('more').onclick=function(){state.shown+=300;draw()};
 $('q').oninput=function(){state.q=this.value.trim().toLowerCase();refresh(true)};
@@ -297,7 +309,7 @@ refresh(true);
 
 export function register({ tool, z, dsp, root, schemas, project, render, sounds, paths, moduleGuidance }) {
   moduleGuidance.push('When a person wants to see or hear what sounds are available, call build_library_page and give them the page: it lists every preset, sample, library file and phrase with filters, search and one-click listening, and they can star picks and paste them back.');
-  tool('build_library_page', 'Write one self-contained HTML page that shows the whole sound library with filters: the measured factory presets, stock LMMS samples, workspace samples, files in LMMS_SAMPLE_LIBRARIES and library phrases. Search, filter by type, source, role and tag, sort, click or use the arrow keys to listen, star picks and copy them as JSON. Samples play straight from disk; presets and phrases are listed with measurements and drawings but have no audio.', {
+  tool('build_library_page', 'Write one self-contained HTML page that shows the whole sound library with filters: the measured factory presets, stock LMMS samples, workspace samples, files in LMMS_SAMPLE_LIBRARIES and library phrases. Workspace renders tagged with tag_sound are listed as finished pieces with filters for composer, era, genre, mood, game use, arrangement and licence, their credits and their source note (<name>.source.md); untagged files are listed as before. Search, filter by type, source, role and tag, sort, click or use the arrow keys to listen, star picks and copy them as JSON. Samples play straight from disk; presets and phrases are listed with measurements and drawings but have no audio.', {
     output: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.html$/i).default('sound-library.html'),
     title: z.string().min(1).max(80).default('Sound library'),
     include: z.array(z.enum(['presets', 'stock', 'workspace', 'libraries', 'phrases'])).min(1).default(['presets', 'stock', 'workspace', 'libraries', 'phrases']),
@@ -317,25 +329,36 @@ export function register({ tool, z, dsp, root, schemas, project, render, sounds,
       let files = (await walk(root, { depth: 2 })).filter(f => !f.relative.startsWith(previewFolder + '/'));
       // A render saved as both WAV and OGG is one track: keep the WAV.
       const wavs = new Set(files.filter(f => /\.wav$/i.test(f.relative)).map(f => f.relative.replace(/\.wav$/i, '')));
-      files = files.filter(f => !(/\.ogg$/i.test(f.relative) && !f.relative.includes('/') && wavs.has(f.relative.replace(/\.ogg$/i, ''))));
-      const pages = new Set((await readdir(root).catch(() => [])).filter(name => name.endsWith('-audition.html')));
+      const oggTwins = new Set(files.filter(f => /\.ogg$/i.test(f.relative) && !f.relative.includes('/') && wavs.has(f.relative.replace(/\.ogg$/i, ''))).map(f => f.relative.replace(/\.ogg$/i, '')));
+      files = files.filter(f => !(/\.ogg$/i.test(f.relative) && oggTwins.has(f.relative.replace(/\.ogg$/i, ''))));
+      const pages = new Set((await readdir(root).catch(() => [])).filter(name => name.endsWith('-audition.html') || name.endsWith('-timeline.html')));
+      // Metadata sidecars (<name>.meta.json) and source notes (<name>.source.md). Pages with none work as before.
+      const { byBase: tagged, problems } = await workspaceMeta(root);
+      if (problems.length) notes.push(`${problems.length} metadata files had problems and were read in part: ${problems.slice(0, 3).join(' | ')}${problems.length > 3 ? ' …' : ''}`);
       const list = [];
       for (const f of files) {
         const kind = classifyWorkspace(f.relative), [item] = sampleItems([f], { type: kind.type, source: kind.source, url: x => relativeUrl(x.relative) });
+        if (oggTwins.has(f.relative.replace(/\.wav$/i, ''))) item.g.push('ogg');
         const info = await lstat(f.full).catch(() => null);
         if (info) item.e = Math.round(info.mtimeMs / 1000);
         if (kind.type === 'track') {
           item.r = 'track';
-          const page = auditionFor(f.relative, pages);
+          const page = auditionFor(f.relative, pages), timeline = auditionFor(f.relative, pages, '-timeline.html');
+          if (timeline) item.y = relativeUrl(timeline);
           if (page) item.a = relativeUrl(page);
           // An outline to click on, for WAV renders small enough to read quickly.
           if (/\.wav$/i.test(f.relative) && info && info.size <= 96 * 1024 * 1024) {
             try { const audio = dsp.decodeWav(await readFile(f.full)); item.f = waveformPeaks(audio); item.l = Math.round(audio.frames / audio.sampleRate); } catch { /* listed without an outline */ }
           }
+          if (!item.l) { const seconds = await audioSeconds(f.full); if (seconds) item.l = Math.round(seconds); }
         }
+        const entry = tagged.get(baseOf(f.relative));
+        if (entry) applyMeta(item, entry, { topLevel: kind.type === 'track' });
         list.push(item);
       }
       add('workspace', list);
+      const pieces = list.filter(i => i.t === 'piece').length;
+      if (pieces) counts.pieces = pieces;
     }
     const libraryRoot = process.env.LMMS_SAMPLE_LIBRARIES;
     if (include.includes('libraries') && libraryRoot && existsSync(libraryRoot)) {

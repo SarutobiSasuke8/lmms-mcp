@@ -6,9 +6,9 @@ Write game music with an AI agent and get engine-ready files back. The agent com
 
 ## Windows setup
 
-Install Node.js 22 or newer. From a checkout run `./setup-windows.ps1`. It installs the Node dependencies and uses WinGet to install stock LMMS 1.2.2 if needed. For manual setup, run `npm ci` and install [LMMS](https://lmms.io/download). The package contains our server and demo, and setup obtains LMMS from its official distribution.
+Install Node.js 20 or newer. From a checkout run `./setup-windows.ps1`. It installs the Node dependencies and uses WinGet to install stock LMMS 1.2.2 if needed. For manual setup, run `npm ci` and install [LMMS](https://lmms.io/download). The package contains our server and demo, and setup obtains LMMS from its official distribution.
 
-Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. The tested combination is Node.js 22 and LMMS 1.2.2 on Windows x64.
+Configure a stdio MCP client with command `node` and the absolute path to `server.mjs` as its argument. Set `LMMS_WORKSPACE` to an existing directory for trusted sessions and renders. The package requires Node.js 20 or newer. It is tested with LMMS 1.2.2 on Windows x64; CI uses Node.js 22, and the server and unit tests also pass on Node.js 20.
 
 | Variable | Purpose |
 | --- | --- |
@@ -20,7 +20,7 @@ Configure a stdio MCP client with command `node` and the absolute path to `serve
 | `LMMS_PARALLEL_RENDERS` | Renders run side by side for stems and layers (1 to 4, default 3) |
 | `LMMS_SAMPLE_LIBRARIES` | Folder of open SFZ libraries for `convert_sfz` (optional, see [docs/sampler.md](docs/sampler.md)) |
 
-To run the published package, use `npx -y @sarutobi-sasuke/lmms-mcp`. For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.9.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
+To run the published package, use `npx -y @sarutobi-sasuke/lmms-mcp`. For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.9.1.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
 
 On connection, the server sends a short workflow brief through MCP initialization. Call `get_started` for the same guidance, workflow entry points and local configuration. The MCP tool list documents exact parameters, including optional live tools when configured.
 
@@ -45,7 +45,8 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio` |
 | Scores and performance | `import_midi`, `shape_performance`, `master_audio` ([docs/midi-import.md](docs/midi-import.md)) |
 | Phrase library | `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase`, `rate_phrase` ([docs/phrases.md](docs/phrases.md)) |
-| Browse sounds | `build_library_page`, `build_library_previews` |
+| Browse sounds | `build_library_page`, `build_library_previews`, `tag_sound`, `list_tagged` ([docs/sound-library.md](docs/sound-library.md)) |
+| See a song | `build_timeline_page` ([docs/timeline.md](docs/timeline.md)) |
 | Check | `set_track_role`, `lint_arrangement`, `quality_report` ([docs/arranger-lint.md](docs/arranger-lint.md)) |
 | Balance | `auto_balance`, `compare_to_reference` ([docs/balance.md](docs/balance.md)) |
 | Loops | `find_loop_points`, `prepare_loop` ([docs/loop-prep.md](docs/loop-prep.md)) |

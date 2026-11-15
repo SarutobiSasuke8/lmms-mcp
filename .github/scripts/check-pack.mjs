@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 const output = execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--dry-run', '--json'], { encoding: 'utf8', shell: process.platform === 'win32' });
 const files = JSON.parse(output)[0].files.map(file => file.path);
-const unwanted = files.filter(file => /\.(wav|ogg|flac|mmp|mmpz)$|\.test\.mjs$|(^|\/)test_.*\.py$|^output\/|(^|\/)\.env/i.test(file));
+const unwanted = files.filter(file => /\.(wav|ogg|flac|mmp|mmpz|pyc|pyo)$|\.test\.mjs$|(^|\/)test_.*\.py$|(^|\/)__pycache__\/|^output\/|(^|\/)\.env/i.test(file));
 const needed = ['server.mjs', 'vst3-render.py', 'sampler/ds_state.py', 'sampler/sfz2dspreset.py', 'sound-catalogue.json', 'README.md', 'LICENSE', 'CHANGELOG.md'];
 const missing = needed.filter(file => !files.includes(file));
 if (!files.some(file => file.startsWith('tools/') && file.endsWith('.mjs'))) missing.push('tools/*.mjs');

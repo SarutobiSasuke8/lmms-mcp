@@ -81,3 +81,11 @@ test('the page has a player, a waveform, clear filters and the track types', () 
   assert.ok(html.includes('value="newest"'));
   assert.ok(!html.includes('id="stop"'));
 });
+
+test('a track also finds its timeline page', async () => {
+  const { auditionFor } = await import('./library-browser.mjs');
+  const pages = new Set(['il-montuno-v3-timeline.html', 'il-montuno-audition.html']);
+  assert.equal(auditionFor('il-montuno-v3-club.wav', pages, '-timeline.html'), 'il-montuno-v3-timeline.html');
+  assert.equal(auditionFor('il-montuno-club.wav', pages, '-timeline.html'), null);
+  assert.equal(auditionFor('il-montuno-v3-club.wav', pages), 'il-montuno-audition.html');
+});

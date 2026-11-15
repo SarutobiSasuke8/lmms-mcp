@@ -2,7 +2,7 @@
 
 ## How a version is cut today
 
-Versions are cut by hand on GitHub. From 0.8.1, pushing a version tag also publishes `@sarutobi-sasuke/lmms-mcp` to npm through `.github/workflows/release.yml`, using npm trusted publishing with provenance. No npm token is stored in GitHub.
+Versions are cut by hand on GitHub. From 0.9.0, pushing a version tag also publishes `@sarutobi-sasuke/lmms-mcp` to npm through `.github/workflows/release.yml`, using npm trusted publishing with provenance. No npm token is stored in GitHub. Version 0.8.1 was prepared but never tagged or published, so 0.9.0 is the first version on npm.
 
 1. The version number is changed in `package.json`, `package-lock.json` and the `McpServer` constructor near the top of `server.mjs`.
 2. The pull request that carries the change is merged into `main`.

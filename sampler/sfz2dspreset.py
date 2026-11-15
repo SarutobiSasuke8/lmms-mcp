@@ -5,10 +5,11 @@ Usage: sfz2dspreset.py <file.sfz> <out.dspreset> [--root DIR] [--abs] [--only TE
 Sample paths are written relative to --root (default: the sfz folder), or absolute with --abs.
 Handles #define, #include, <control>/<global>/<master>/<group>/<region> inheritance, default_path,
 key names, velocity ranges, loops, offsets, tuning, volume, pan, ampeg, round robin (seq_*), and
-keeps only regions whose cc/keyswitch conditions hold at the SFZ's default controller values and the default
-keyswitch (sw_default), and applies *_onccN modulation of envelope, volume, pan, tune, offset and velocity tracking
-at those default values. With --keep-releases, release samples become Decent Sampler release groups.
-Skipped: other keyswitched articulations, cc-gated layers, regions triggered by a controller, LFOs, filters and effects.
+keeps only regions whose cc/keyswitch conditions hold at the SFZ's default controller values.
+A keyswitched library keeps its default articulation (sw_default). Skipped: trigger=release, other keyswitched\narticulations, cc-gated and cc-triggered layers, LFOs, filters and effects.
+*_onccN modulation of envelopes, volume, pan, tune, offset and velocity tracking is applied at the default
+controller values, with the standard SFZ curves 0 to 6. With --keep-releases, release samples become Decent
+Sampler release groups.
 """
 import re, sys, os, argparse
 from xml.sax.saxutils import quoteattr
@@ -39,6 +40,7 @@ def key(v):
 
 
 def preprocess(path, defines, depth=0, main_dir=None):
+    """Expand #define and #include, in order. Both may appear anywhere on a line, and a later #define replaces an earlier one."""
     if depth > 12:
         raise RuntimeError("include depth")
     out = []
@@ -47,12 +49,14 @@ def preprocess(path, defines, depth=0, main_dir=None):
     with open(path, encoding="utf-8", errors="replace") as handle:
         text = handle.read()
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-    return preprocess_lines(text.splitlines(), base, defines, depth, main_dir)
 
+    def substitute(value):
+        for name in sorted(defines, key=len, reverse=True):
+            if name in value:
+                value = value.replace(name, defines[name])
+        return value
 
-def preprocess_lines(lines, base, defines, depth, main_dir):
-    out = []
-    for line in lines:
+    for line in text.splitlines():
         line = re.sub(r"//.*$", "", line).rstrip()
         s = line.strip()
         if not s:
@@ -61,34 +65,19 @@ def preprocess_lines(lines, base, defines, depth, main_dir):
             parts = s.split(None, 2)
             defines[parts[1]] = parts[2].strip() if len(parts) > 2 else ""
             continue
-        if "#include" in s and not s.startswith("#include"):
-            head, tail = s.split("#include", 1)
-            for name in sorted(defines, key=len, reverse=True):
-                head = head.replace(name, defines[name])
-            if head.strip():
-                out.append(head.rstrip())
-            m = re.match(r'\s*("[^"]+")(.*)', tail)
-            if not m:
-                raise ValueError(f"bad #include in: {s}")
-            rest = m.group(2).strip()
-            out.extend(preprocess_lines(["#include " + m.group(1)] + ([rest] if rest else []), base, defines, depth, main_dir))
-            continue
-        if s.startswith("#include"):
-            for name in sorted(defines, key=len, reverse=True):
-                s = s.replace(name, defines[name])
-            m = re.search(r'"([^"]+)"', s)
-            rel = m.group(1).replace("\\", "/")
+        pieces = re.split(r'#include\s+"([^"]+)"', line)  # text, path, text, path, ...
+        for index, piece in enumerate(pieces):
+            if index % 2 == 0:
+                if piece.strip():
+                    out.append(substitute(piece))
+                continue
+            rel = substitute(piece).replace("\\", "/")
             inc = os.path.normpath(os.path.join(main_dir, rel))  # SFZ spec: relative to the main file
             if not os.path.exists(inc):
                 inc = os.path.normpath(os.path.join(base, rel))
             if not inside(inc):
                 raise ValueError(f"#include outside the library folder: {rel}")
             out.extend(preprocess(inc, defines, depth + 1, main_dir))
-            continue
-        for name in sorted(defines, key=len, reverse=True):
-            if name in line:
-                line = line.replace(name, defines[name])
-        out.append(line)
     return out
 
 
@@ -140,13 +129,18 @@ def active(r, cc, keep_releases):
         return False
     if "sw_previous" in r or "sw_up" in r or "sw_down" in r:
         return False
-    if "sw_last" in r:
-        default = r.get("sw_default", r.get("sw_lokey"))
-        if default is None or key(r["sw_last"]) != key(default):
-            return False  # keep only the articulation that plays when no keyswitch is pressed
-    if any(re.fullmatch(r"(start|on)_(lo|hi)(hd)?cc\d+", k) for k in r):
-        return False  # triggered by a controller, such as pedal noise on CC64
-    if "key" not in r and "lokey" in r and key(r["lokey"]) < 0:
+    if "sw_last" in r:  # keep the articulation that is selected when nothing has been switched
+        try:
+            if "sw_default" not in r or key(r["sw_last"]) != key(r["sw_default"]):
+                return False
+        except ValueError:
+            return False
+    if any(re.fullmatch(r"on_(lo|hi)(hd)?cc\d+", k) for k in r):  # played by a controller, such as pedal noise
+        return False
+    try:
+        if "hikey" in r and key(r["hikey"]) < 0:  # hikey=-1 means the region is never played from the keyboard
+            return False
+    except ValueError:
         return False
     for k, v in r.items():
         m = re.fullmatch(r"(lo|hi)cc(\d+)", k)
@@ -172,8 +166,6 @@ def active(r, cc, keep_releases):
 
 MODULATED = {"ampeg_attack": 0.0, "ampeg_decay": 0.0, "ampeg_sustain": 100.0, "ampeg_release": 0.05,
              "amp_veltrack": 100.0, "volume": 0.0, "pan": 0.0, "tune": 0.0, "offset": 0.0}
-
-
 # The standard SFZ controller curves 0 to 6. Custom <curve> headers fall back to linear.
 CURVES = {0: lambda x: x, 1: lambda x: 2 * x - 1, 2: lambda x: 1 - x, 3: lambda x: 1 - 2 * x,
           4: lambda x: x * x, 5: lambda x: x ** 0.5, 6: lambda x: (1 - x) ** 0.5}
