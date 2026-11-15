@@ -6,6 +6,15 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
+
+- Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
+- Add optional `render_atelier` and `render_theremin` stereo instrument stem tools.
+- Time-stretch WAV loops and chop drum breaks with sixteenth-note or transient slicing, pattern sequencing and a slice manifest.
+- `lmms-compose nightly` renders and ranks soundtrack cues unattended and builds dated audition pages.
+- `scale_lock`, `arpeggiate` and `note_probability`: edits (and `apply_edits` steps) that snap a track to a named scale, turn chords into arpeggios, and drop or vary notes by seeded chance. Drum tracks are skipped unless named.
+- SoundFont rendering: `list_soundfonts` and `render_soundfont` drive FluidSynth to render a workspace MIDI through a `.sf2` or `.sf3` into a WAV. Configurable via `LMMS_FLUIDSYNTH` and optional `LMMS_SOUNDFONTS`. See docs/soundfont.md.
+- `write_loop_points`: write loop start and end into a WAV (`smpl` chunk) or OGG (`LOOPSTART`, `LOOPEND`, `LOOPLENGTH`) with a `.loop.json` sidecar, or tag a `prepare_loop` manifest's files in place.
 - Add optional `groovebox_pattern`, `render_groovebox` and `load_pad_kit` tools for locally installed Atelier DSP.
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
@@ -25,6 +34,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Fixed
 
 - Decent Sampler no longer renders silence after a preset is set: the worker polls the plug-in's state until the new preset is applied (Decent Sampler applies it on a background thread) before it plays the sound check.
+- Loops that start with a drum hit are no longer flagged as clicking at the loop join. `analyze` reports `loop.boundaryStepDbfs`, and the warning fires only when the join jumps more than 6 dB above the step between neighbouring samples.
 - VST3 stem rendering aligns one-frame rounding differences to the requested length and reports malformed or silent output separately.
 
 ## 0.9.1 - 2026-11-15
