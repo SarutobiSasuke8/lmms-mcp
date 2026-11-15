@@ -439,7 +439,8 @@ export function motifStats(info, ctx) {
   info.perBar.forEach((bar, b) => {
     if (bar.groups.length < 2) return;
     const tops = bar.groups.map(g => g.top);
-    bars.push({ b, rhythm: bar.groups.map(g => g.tick - b * ctx.tpb), intervals: tops.slice(1).map((p, k) => p - tops[k]), exact: bar.groups.map(g => `${g.tick - b * ctx.tpb}:${g.top}`).join(' ') });
+    // Onsets are compared on a 32nd-note grid, so a humanised repeat still counts as a repeat.
+    bars.push({ b, rhythm: bar.groups.map(g => Math.round((g.tick - b * ctx.tpb) / 6) * 6), intervals: tops.slice(1).map((p, k) => p - tops[k]), exact: bar.groups.map(g => `${g.tick - b * ctx.tpb}:${g.top}`).join(' ') });
   });
   const related = bars.filter(x => bars.some(y => y !== x && barSimilarity(x, y) >= thresholds.motifSimilarity)).length;
   return { track: info.name, bars: bars.length, relatedShare: bars.length ? Number((related / bars.length).toFixed(2)) : 0,
