@@ -10,7 +10,7 @@ Optional: set `LMMS_SOUNDFONTS` to a folder that holds your `.sf2` / `.sf3` file
 
 ## Tool
 
-`render_soundfont`
+`list_soundfonts` and `render_soundfont`
 
 | Argument | Required | Default | Notes |
 | --- | --- | --- | --- |
@@ -41,3 +41,12 @@ The resulting WAV can be analysed with `analyze_audio` or loaded as a sample tra
 - This is a headless render path. It does not embed the SoundFont into the LMMS project; the editable source remains the MIDI.
 - FluidSynth must be installed separately. The server does not bundle it.
 - For SFZ libraries that already work with the Decent Sampler path, prefer `convert_sfz` + `render_vst3_stems` when you want the result inside an LMMS project.
+
+
+## list_soundfonts
+
+Returns `.sf2` and `.sf3` files found in the workspace and in `LMMS_SOUNDFONTS` (if set).
+
+## Bank and preset
+
+`render_soundfont` accepts optional `bank` and `preset` numbers. MIDI program-change events in the file are always honoured. Use `bank`/`preset` as a hint when the MIDI does not select an instrument.
