@@ -13,6 +13,8 @@ No tool changes. Every 0.9.0 tool keeps its name and its required arguments.
 - `build_timeline_page`: one HTML page that shows a song as a DAW would, with each stem as a lane under a bar ruler, sections and DJ effects as blocks, synced playback with mute and solo, section looping, and notes pinned to bars that can be copied back. The library page links each track to its timeline.
 - `tag_sound` and `list_tagged`: metadata for workspace sounds and finished pieces (title, composer, era, genre, mood, game use, arrangement, instrumentation, length, loop, source, licence, credits, date) kept in a `<name>.meta.json` sidecar shared by every format of the same name, checked on write and searchable by any field. See [docs/sound-library.md](docs/sound-library.md).
 
+- Reggae, dub and dubstep styles for `compose_piece`: off-beat `skank` and `bubble` accompaniment with an optional dub `echo`, `reggae`, `sub` and `wobble` bass, `onedrop`, `rockers`, `steppers` and `dubstep` drums, a drop-out under the dub solo and a siren track.
+
 ### Changed
 
 - `build_library_page` lists tagged renders as finished pieces, adds filters for composer, era, genre, mood, game use, arrangement and licence, shows credits, the source link and the `<name>.source.md` note, and reads the length of OGG renders. Pages with no metadata are unchanged.
