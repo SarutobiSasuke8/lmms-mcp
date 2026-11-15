@@ -4,6 +4,17 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+### Added
+
+- `import_midi`: a standard MIDI file becomes an editable LMMS project, with its time signature and tempo, sustain pedal baked into note lengths, volume changes folded into velocities, merged tracks and `form` to unfold repeats.
+- `shape_performance`: phrase dynamics, melody voicing, metric accents, ritardando at phrase ends and the final bars, a simulated sustain pedal, melody lead and seeded variation. Also a step for `apply_edits`.
+- `master_audio`: trim, fade and master any workspace WAV to a loudness target.
+- `render_vst3_stems` takes an optional `width`, `eq` and `reverb` for each track.
+
+### Changed
+
+- `render_vst3_stems` renders up to 600 seconds instead of 120.
+
 ## 0.9.0 - 2026-11-15
 
 No breaking changes. Every 0.8.1 tool keeps its name and its required arguments.
