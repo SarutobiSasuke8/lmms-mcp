@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `convert_sfz` reads libraries built like the Salamander Grand: `#include` inside a header line, the default keyswitch, controller modulation at default values with the standard SFZ curves, and (with `keepReleases`) release samples as Decent Sampler release groups. Regions triggered by a controller, such as pedal noise, are skipped.
+- `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `import_midi`: a standard MIDI file becomes an editable LMMS project, with its time signature and tempo, sustain pedal baked into note lengths, volume changes folded into velocities, merged tracks and `form` to unfold repeats.
 - `shape_performance`: phrase dynamics, melody voicing, metric accents, ritardando at phrase ends and the final bars, a simulated sustain pedal, melody lead and seeded variation. Also a step for `apply_edits`.
 - `master_audio`: trim, fade and master any workspace WAV to a loudness target.
@@ -14,6 +16,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Changed
 
 - `render_vst3_stems` renders up to 600 seconds instead of 120.
+- `setup-libraries-windows.ps1` fetches the Salamander Grand Piano (CC BY 3.0, about 720 MB) as the default piano. The Splendid Grand is still available with `-Only splendid`.
 
 ## 0.9.0 - 2026-11-15
 
