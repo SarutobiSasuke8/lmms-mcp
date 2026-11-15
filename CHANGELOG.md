@@ -6,6 +6,9 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `fatten` applies a per-sound design chain (unison/doubler, saturation, OTT-style 3-band compression, chorus, EQ tilt, stereo width with mono lows). Presets: fat lead, huge pad, reese grit, punchy kick, wide hats, dirty 808.
+- `layer_sounds` stacks 2–4 WAVs with gain matching. Both are additive to existing mix tools.
+
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `convert_sfz` applies controller modulation at the default values (`*_onccN` for envelopes, volume, pan, tuning, offset and velocity tracking) with the standard SFZ curves, so the Salamander Grand gets its intended 73% velocity tracking and 1 second release. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends.
 
