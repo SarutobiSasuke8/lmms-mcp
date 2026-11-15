@@ -47,6 +47,6 @@ The resulting WAV can be analysed with `analyze_audio` or loaded as a sample tra
 
 Returns `.sf2` and `.sf3` files found in the workspace and in `LMMS_SOUNDFONTS` (if set).
 
-## Bank and preset
+## Instrument selection
 
-`render_soundfont` accepts optional `bank` and `preset` numbers. MIDI program-change events in the file are always honoured. Use `bank`/`preset` as a hint when the MIDI does not select an instrument.
+MIDI program-change events in the file are honoured by FluidSynth. The optional `bank` and `preset` arguments are reserved for a future release and currently have no effect. Put the program change in the MIDI for reliable instrument selection.
