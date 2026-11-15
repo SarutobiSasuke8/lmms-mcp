@@ -40,9 +40,10 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Read | `inspect_project`, `inspect_arrangement`, `read_pattern` |
 | Start fast | `list_blueprints`, `create_from_blueprint`, `develop_motif` ([docs/blueprints.md](docs/blueprints.md)) |
 | Write tunes | `write_melody`, `write_accompaniment` ([docs/melody.md](docs/melody.md)) |
+| Nightly soundtrack runs | Headless recipe batches and dated listening pages ([docs/nightly.md](docs/nightly.md)) |
 | Whole pieces | `compose_piece`, `compose_batch`, and `lmms-compose` on the command line with no agent ([docs/compose.md](docs/compose.md)) |
 | Solo lines | `write_solo` |
-| DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio` |
+| DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio`, `time_stretch`, `chop_break` ([break editing](docs/break-edits.md)) |
 | Scores and performance | `import_midi`, `shape_performance`, `master_audio` ([docs/midi-import.md](docs/midi-import.md)) |
 | Phrase library | `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase`, `rate_phrase` ([docs/phrases.md](docs/phrases.md)) |
 | Browse sounds | `build_library_page`, `build_library_previews`, `tag_sound`, `list_tagged` ([docs/sound-library.md](docs/sound-library.md)) |
@@ -167,6 +168,10 @@ Use `export_one_shots` to process up to 32 mono or stereo 48 kHz, 16-bit PCM WAV
 
 A sampler track that plays a workspace WAV stores its absolute path. Use LMMS to relink the source if you move the project to a different machine. Stock samples are stored by their library path and move with any LMMS installation.
 
+## Visual Mix Desk
+
+Start the local sound library server and open `/mix-desk/`, or choose **Add to desk** on a playable row in a rebuilt library page. The browser desk mixes 8 channels, resamples or records loops, and saves takes and tagged mixes into the same workspace. See [Mix Desk controls](docs/mix-desk.md).
+
 ## Fathom Atelier
 
 Set `LMMS_FATHOM_WORKLET` to the absolute path of a trusted Fathom Atelier checkout's `public/worklets/synth-processor.js` before launching the MCP. The LMMS MCP package ships the adapter. The synth engine is supplied locally. Use `list_instruments` to check configuration and discover the stock plugin and preset inventory. The inventory checks files on disk. Third-party plugins loaded inside hosts such as Carla or VeSTige need their own inventory.
@@ -194,6 +199,10 @@ The bridge uses the written pitches, note lengths and velocities. It interpolate
 
 `search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
 
+## SoundFonts
+
+`render_soundfont` renders a workspace MIDI file through a `.sf2` or `.sf3` using FluidSynth. Set `LMMS_FLUIDSYNTH` (or have `fluidsynth` on PATH) and optionally `LMMS_SOUNDFONTS`. See `docs/soundfont.md`.
+
 ## Optional Atelier groovebox tools
 
 Link a local checkout of the private Atelier DSP engine with `npm link atelier-dsp` after registering the checkout with `npm link`, or set `LMMS_ATELIER_DSP` to the absolute path to its repository root. Use a branch that contains `src/groovebox/index.js`. The LMMS MCP server starts without the engine, and the groovebox tools report the local setup needed when called without it.
@@ -201,6 +210,10 @@ Link a local checkout of the private Atelier DSP engine with `npm link atelier-d
 - `groovebox_pattern` builds a 16-step project with per-hit velocity and a synth bass lane with accent and slide.
 - `load_pad_kit` validates a kit JSON file in `LMMS_WORKSPACE` and returns its pad data.
 - `render_groovebox` writes a new stereo WAV or MIDI file in `LMMS_WORKSPACE`. For sampler pads, pass a map from each pad's asset ID to the workspace WAV file.
+
+## Optional Atelier instrument renderers
+
+Use the same local Atelier DSP link or `LMMS_ATELIER_DSP` setting as the groovebox tools. `render_atelier` renders a Fathom, Vesper or Halo voice from inline notes, a track in a workspace MIDI file or a track in an LMMS project. Supply a compatible workspace bank and preset, or use an installed factory preset. `render_theremin` supports timed notes, continuous pitch curves, free glide and scale snapping. Both write a 48 kHz stereo WAV to the workspace. Set `durationSeconds` to zero-pad stems to the same length, allowing room for the voice release.
 
 ## External VST3 instruments
 

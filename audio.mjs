@@ -264,12 +264,17 @@ export function analyze(audio, { sections = [], pitch = false } = {}) {
   let jump = 0;
   for (const ch of audio.channels) jump = Math.max(jump, Math.abs(ch[0] - ch[frames - 1]));
   const edge = Math.min(frames, Math.round(sampleRate * 0.05));
+  // How fast the waveform itself moves at the two ends: the largest sample-to-sample step in the first and last millisecond.
+  // A join that jumps no more than the audio does by itself is a continuation, not a click (a loop that starts on a drum hit).
+  let step = 0;
+  const near = Math.min(frames - 1, Math.max(8, Math.round(sampleRate * 0.001)));
+  for (const ch of audio.channels) for (let i = 1; i <= near; i++) step = Math.max(step, Math.abs(ch[i] - ch[i - 1]), Math.abs(ch[frames - i] - ch[frames - i - 1]));
   const report = {
     sampleRate, channels: audio.channels.length, durationSeconds: Number((frames / sampleRate).toFixed(4)),
     ...loudness(audio), truePeakDbfs: db(truePeak(audio)), ...levels(audio, 0, frames),
     clippedSamples: clipped, dcOffset: Number((dc / (frames * audio.channels.length)).toFixed(5)),
     ...spectrum(audio),
-    loop: { boundaryJumpDbfs: db(jump), startRmsDbfs: powerDb(meanSquare(audio, 0, edge)), endRmsDbfs: powerDb(meanSquare(audio, frames - edge, frames)) },
+    loop: { boundaryJumpDbfs: db(jump), boundaryStepDbfs: db(step), startRmsDbfs: powerDb(meanSquare(audio, 0, edge)), endRmsDbfs: powerDb(meanSquare(audio, frames - edge, frames)) },
   };
   if (report.rmsDbfs !== null && report.peakDbfs !== null) report.crestDb = Number((report.peakDbfs - report.rmsDbfs).toFixed(2));
   const signal = pitch || sections.some(s => s.pitch) ? mono(audio) : null;
@@ -288,6 +293,15 @@ export function analyze(audio, { sections = [], pitch = false } = {}) {
   return report;
 }
 
+// A loop join clicks when the first and last samples differ by more than -30 dBFS AND by clearly more than the waveform
+// moves between neighbouring samples at the ends. Loops that start on a drum hit differ by a lot but only as much as the
+// hit itself rises, so they are not flagged. Reports without boundaryStepDbfs fall back to the plain -30 dBFS rule.
+export function loopJoinClicks(loop) {
+  if (loop.boundaryJumpDbfs === null || loop.boundaryJumpDbfs === undefined || loop.boundaryJumpDbfs <= -30) return false;
+  if (loop.boundaryStepDbfs === null || loop.boundaryStepDbfs === undefined) return true; // flat ends (step 0) or an older report
+  return loop.boundaryJumpDbfs > loop.boundaryStepDbfs + 6;
+}
+
 // Plain-language warnings an agent can act on without listening.
 export function advise(report, { loop = false, targetLufs } = {}) {
   const notes = [];
@@ -301,7 +315,7 @@ export function advise(report, { loop = false, targetLufs } = {}) {
   const bands = report.bandsDbfs;
   if (bands.lowMid !== null && bands.highMid !== null && bands.lowMid - bands.highMid > 18) notes.push('Low mids dominate the upper mids by more than 18 dB: the mix may sound muddy or dull.');
   if (bands.bass !== null && bands.mid !== null && bands.mid - bands.bass > 15) notes.push('Bass is more than 15 dB under the mids: the mix may sound thin.');
-  if (loop && report.loop.boundaryJumpDbfs !== null && report.loop.boundaryJumpDbfs > -30) notes.push('The first and last samples differ by more than -30 dBFS: expect a click at the loop point.');
+  if (loop && loopJoinClicks(report.loop)) notes.push('The first and last samples differ by more than -30 dBFS and by more than the audio moves at either end: expect a click at the loop point.');
   for (const section of report.sections ?? []) {
     if (section.rmsDbfs === null) notes.push(`Section "${section.name}" is silent.`);
     else if (section.stereoCorrelation !== undefined && section.stereoCorrelation !== null && section.stereoCorrelation < 0.2) {

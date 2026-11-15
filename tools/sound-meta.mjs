@@ -17,7 +17,7 @@ const audioFile = /\.(wav|ogg|flac|mp3)$/i;
 export const eras = ['medieval', 'renaissance', 'baroque', 'classical', 'romantic', 'impressionist', 'modern', 'traditional', 'original'];
 export const gameUses = ['menu', 'hub', 'puzzle', 'exploration', 'ambient', 'battle', 'boss', 'victory', 'defeat', 'cutscene', 'credits', 'stinger'];
 export const arrangements = ['straight', 'shaped', 'chiptune', 'dance', 'orchestral', 'ambient', 'jazz', 'original'];
-export const kinds = ['piece', 'sound', 'stem'];
+export const kinds = ['piece', 'sound', 'stem', 'take', 'mix'];
 // Genres and moods are open lists. These are the words to reach for first, so filters stay tidy.
 export const suggestedGenres = ['classical piano', 'orchestral', 'chiptune', 'dance', 'ambient', 'jazz', 'game cue', 'lo-fi', 'folk', 'rock'];
 export const suggestedMoods = ['calm', 'gentle', 'melancholy', 'dreamy', 'playful', 'bright', 'tense', 'dark', 'heroic', 'triumphant', 'mysterious', 'energetic'];
@@ -39,7 +39,7 @@ export const fields = {
   licence: { type: 'text', max: 80, doc: 'Use one spelling per licence: "public domain", "CC0", "CC-BY 3.0", "CC-BY 4.0", "CC-BY-SA 4.0", "MIT", "all rights reserved".' },
   credits: { type: 'list', max: 12, itemMax: 300, doc: 'Attribution lines to show wherever the sound is used.' },
   date: { type: 'date', doc: 'The day this file was made, YYYY-MM-DD.' },
-  kind: { type: 'enum', values: kinds, doc: 'piece (finished music), sound (a sample or one-shot) or stem. A tagged file at the top of the workspace is a piece unless this says otherwise.' },
+  kind: { type: 'enum', values: kinds, doc: 'piece (finished music), sound (a sample or one-shot) , stem, desk take or desk mix. A tagged file at the top of the workspace is a piece unless this says otherwise.' },
   tags: { type: 'list', lower: true, max: 24, doc: 'Free tags; they join the tag filter on the library page.' },
   notes: { type: 'text', max: 2000 },
   sourceNote: { type: 'path', doc: 'A workspace .md file about where the music came from, when it is not next to the sound as <name>.source.md.' },
