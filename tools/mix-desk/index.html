@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LMMS Mix Desk</title><link rel="stylesheet" href="./style.css"></head>
+<body><main>
+<header class="mast"><div><a href="/sound-library.html">← Sound library</a><h1>Mix Desk</h1></div><output id="status" aria-live="polite"></output></header>
+<section class="transport" aria-label="Transport">
+<button id="play" class="primary">Play</button><button id="stop">Stop</button>
+<label>Tempo <input id="bpm" type="number" min="40" max="240" value="120"> <span>BPM</span></label>
+<label>Capture <input id="bars" type="number" min="1" max="16" value="2"> <span>bars</span></label>
+<div class="spacer"></div><button id="devices">Devices & MIDI</button><button id="library">Samples</button><button id="files">Session</button><button id="export">Export WAV</button>
+</section>
+<div class="workspace">
+<section class="mixer" aria-label="Mix channels"><div id="channels" class="channels"></div>
+<div class="master"><h2>Master</h2><output id="loudness" aria-label="Momentary loudness">— LUFS</output><div id="master-controls" class="master-controls"></div></div>
+</section>
+<section class="inspector" aria-label="Channel editor">
+<div class="section-heading"><h2 id="selected">Channel 1</h2><button id="pick">Choose sample</button></div>
+<div class="source-line"><span id="current-source">Empty channel</span><button id="unload">Clear</button></div>
+<h3>Live input</h3>
+<div class="controls" id="input-controls"></div>
+<div class="controls"><output id="input-peak" aria-label="Live input peak">Input off</output><button id="tuner" aria-pressed="false">Tuner</button><button id="instrument">Use MIDI synth</button></div>
+<div id="tuner-display" hidden><span>−50</span><div class="needle"><i></i></div><span>+50</span><output id="pitch">—</output></div>
+<h3>Capture &amp; loop</h3>
+<div class="controls">
+<label>Input <select id="capture-source"></select></label><button id="record" class="hot">Record</button>
+<label class="check"><input id="overdub" type="checkbox"> Overdub</label><button id="undo">Undo</button><button id="save-take">Save take</button>
+</div>
+<div class="controls" id="loop-controls"></div>
+<div class="section-heading"><h3>Insert rack</h3><label>Add insert <select id="insert-type"><option value="">Select effect</option></select></label></div>
+<ol id="rack"></ol>
+</section>
+</div>
+</main>
+<dialog id="sample-dialog"><form method="dialog" class="section-heading"><h2>Sample library</h2><button>Close</button></form><div class="picker-controls"><label>Search <input id="search" type="search"></label><label>Source <select id="source-filter"></select></label><label>Tag <select id="tag-filter"></select></label><label>Facet <select id="facet"></select></label><label>Value <select id="facet-value"></select></label></div><div id="sample-list"></div></dialog>
+<dialog id="file-dialog"><form method="dialog" class="section-heading"><h2>Session &amp; WAV files</h2><button>Close</button></form>
+<label>File name <input id="name" maxlength="80" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,79}" value="desk-session"></label>
+<label>Tags <input id="tags" placeholder="Separate tags with commas"></label>
+<div class="controls"><button id="save-session">Save session</button><button id="load-session">Load session</button><button id="write-mix">Save mix to library</button></div>
+<label>Saved sessions <select id="sessions"></select></label></dialog>
+<dialog id="device-dialog"><form method="dialog" class="section-heading"><h2>Devices &amp; MIDI</h2><button>Close</button></form>
+<div class="controls"><label>Input device <select id="input-device"></select></label><label>Output device <select id="output-device"></select></label><button id="refresh-devices">Refresh devices</button></div>
+<div class="controls"><label>Recording compensation (ms) <input id="latency" type="number" min="-500" max="500" step=".1" value="0"></label><button id="measure-latency">Measure loopback</button><output id="latency-status"></output></div>
+<p class="hint">Connect an output to the selected input channel with monitoring off to measure round-trip delay.</p>
+<div class="controls"><button id="midi-connect">Connect MIDI</button><button id="midi-learn" aria-pressed="false">MIDI learn</button><button id="clear-midi">Clear mappings</button><output id="midi-state"></output></div>
+<p class="hint">In learn mode, click a control or press Enter on it, then move a controller or press a key.</p>
+</dialog>
+<script type="module" src="./app.mjs"></script></body></html>
