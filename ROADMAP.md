@@ -53,6 +53,33 @@ What is done, what is next and what is only an idea. Tool changes are recorded i
 - [ ] Learning from scores: extract progressions and phrases from imported public-domain MIDI into the phrase library, with source and licence tags
 - [ ] Nightly VPS runs: a headless command that runs a list of soundtrack recipes and writes a dated listening page. Scheduling on the VPS is a host change and needs Alexei; the repo side is the command and its docs only
 
+## Next: dance music tooling
+
+The goal is a full dance-music workstation an agent can drive, headless on Linux, with every render recorded in the generation catalogue along with its licence. Phases build on one another. Bundled assets are CC0 or MIT only. GPL synths and effects (Surge XT, Odin 2, Dexed, Vitalium, Dragonfly Reverb, LSP) are detected and supported, never bundled. Vital factory presets and the Vital name are never used.
+
+Phase 1, the dance and drum-and-bass pack:
+- [ ] Fix the VST3 stem length bug, add a true-peak limiter and iterate to the LUFS target in `master_audio`, and add MP3 export
+- [ ] `mix_stems`, kick-following `sidechain_duck`, `time_stretch` and `chop_break`
+- [ ] House, techno, trance, DnB and jungle styles and phrases, plus `add_build`
+- [ ] Readable Surge XT parameters, recipes and VST3 parameter automation
+- [ ] A dance profile for the arrangement checker, and mono and kick/sub checks in `analyze_audio`
+
+Phase 2, sound and groove:
+- [ ] Genre templates as style data: deep house, tech house, progressive, big room, future bass, UK garage/2-step, breaks, hardstyle, synthwave, lo-fi house, afro house, amapiano, and liquid, neuro and roller DnB (BPM, drum grids, swing, bass archetype, phrase lengths)
+- [ ] A groove engine: swing templates (MPC, UKG shuffle, amapiano 3-3-2, 3:2 clave), humanise, ghost notes, genre fills and drum layering
+- [ ] A synth sound-design bank of our own recipes: supersaw, reese, wobble, hoover, pluck, acid 303, organ bass, stabs, pads, 808, log drum and screech. Also a plugin registry that records plugin name, version and licence, and Linux install docs
+- [ ] Licence-clean drums: a synthesised drum engine (kick, snare, clap, hats, 808, hardstyle kick), CC0 kit fetching verified per file, and kit mapping, layering and tuning to key
+
+Phase 3, arrangement and mix:
+- [ ] An arrangement engine: energy curves in 8/16/32-bar phrases, DJ-friendly intro and outro, synthesised risers, impacts, downlifters and tape stops, automation lanes, and extended mix, radio edit and DJ tool variants
+- [ ] A mix and master suite: multiband compression, saturation, mid/side imaging with mono lows, reference-track matching (references stay local), loudness presets (streaming −14 LUFS/−1 dBTP, Apple about −16, club, broadcast), and a mix report
+
+Phase 4, DJ, vocals, evaluation and the full recipe:
+- [ ] A DJ toolkit: BPM, key and phrase detection with permissive libraries only, Camelot harmonic mixing, a set planner, beatmatched mixes with phrase-aligned transitions and cue sheets, and DJ packs (extended mix, radio edit, stems)
+- [ ] Evaluation: genre-fit checks (BPM, kick pattern, swing, spectral balance), energy-curve and drop analysis, and loudness-matched A/B pages that feed the taste loop
+- [ ] Vocal chops on user-supplied or CC0 audio, and opt-in Piper TTS gated by each voice model's licence, with no cloning of real people
+- [ ] `lmms-compose dance recipe.json`, end to end: compose, groove, arrange, render, mix, master each variant, evaluate and catalogue, with example recipes per genre
+
 ## Games that will use the music
 
 - [ ] Rokumon Sudoku: a choice of calm classical tracks
