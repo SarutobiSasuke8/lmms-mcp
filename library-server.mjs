@@ -4,7 +4,8 @@
 // Reads LMMS_WORKSPACE, LMMS_SAMPLE_LIBRARIES and LMMS_SAMPLES (or the default LMMS install). Listens on 127.0.0.1 only.
 import { createServer } from 'node:http';
 import { createReadStream, existsSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { localHost, readContained, serveDesk } from './tools/mix-desk/api.mjs';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -23,7 +24,8 @@ export function mounts(env = process.env) {
 export function resolveRequest(urlPath, folders) {
   let decoded;
   try { decoded = decodeURIComponent(urlPath.split('?')[0]); } catch { return null; }
-  if (decoded.includes('\0')) return null;
+  if (!decoded.startsWith('/') || decoded.startsWith('//') || /[\0:\\]/.test(decoded)
+      || decoded.split('/').some(segment => segment.startsWith('.'))) return null;
   const pick = decoded.startsWith('/_stock/') ? [folders.stock, decoded.slice(8)] : decoded.startsWith('/_lib/') ? [folders.library, decoded.slice(6)] : [folders.workspace, decoded.slice(1)];
   const [base, relative] = pick;
   if (!base) return null;
@@ -41,20 +43,26 @@ export function parseRange(header, size) {
 }
 export function startServer({ port = 18290, folders = mounts() } = {}) {
   const server = createServer(async (request, response) => {
+    if (!localHost(request.headers.host)) { response.writeHead(403).end('Expected a local host'); return; }
+    let urlPath;
+    try { urlPath = decodeURIComponent(request.url.split('?')[0]); }
+    catch { response.writeHead(400).end('Invalid URL'); return; }
+    if (await serveDesk(request, response, folders)) return;
     const file = request.method === 'GET' || request.method === 'HEAD' ? resolveRequest(request.url, folders) : null;
-    const info = file && await stat(file).catch(() => null);
-    if (!info?.isFile()) { response.writeHead(404, { 'content-type': 'text/plain' }); response.end('Not found'); return; }
+    const base = urlPath.startsWith('/_stock/') ? folders.stock : urlPath.startsWith('/_lib/') ? folders.library : folders.workspace;
+    const info = file && await readContained(file, base);
+    if (!info) { response.writeHead(404, { 'content-type': 'text/plain' }); response.end('Not found'); return; }
     const headers = { 'content-type': types[path.extname(file).toLowerCase()] ?? 'application/octet-stream', 'accept-ranges': 'bytes', 'cache-control': 'no-cache' };
     const range = parseRange(request.headers.range, info.size);
     if (range) { headers['content-range'] = `bytes ${range.start}-${range.end}/${info.size}`; headers['content-length'] = range.end - range.start + 1; response.writeHead(206, headers); }
     else { headers['content-length'] = info.size; response.writeHead(200, headers); }
     if (request.method === 'HEAD') { response.end(); return; }
-    createReadStream(file, range ?? {}).on('error', () => response.destroy()).pipe(response);
+    createReadStream(info.path, range ?? {}).on('error', () => response.destroy()).pipe(response);
   });
   server.listen(port, '127.0.0.1');
   return server;
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.argv[2] ?? process.env.PORT ?? 18290), folders = mounts();
   if (!existsSync(folders.workspace)) { console.error(`Workspace not found: ${folders.workspace}`); process.exit(1); }
   startServer({ port, folders });

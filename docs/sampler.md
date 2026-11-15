@@ -5,12 +5,13 @@ Stock LMMS has synths and a few drum samples. This route plays open SFZ sample l
 ## Setup
 
 1. Run `setup-vst3-windows.ps1` (see the README) for the Decent Sampler plug-in and the isolated Python host. Set `LMMS_VST3_PYTHON` and `LMMS_DECENT_SAMPLER_VST3` from the `mcp-env.json` it writes.
-2. Run `setup-libraries-windows.ps1`. It fetches four open libraries with git sparse checkout, about 470 MB. Use `-Only` to take some of them and `-Destination` to choose the folder.
+2. Run `setup-libraries-windows.ps1`. It fetches four open libraries with git sparse checkout, about 1.1 GB, most of it the piano. Use `-Only` to take some of them and `-Destination` to choose the folder.
 3. Set `LMMS_SAMPLE_LIBRARIES` to that folder and restart the MCP client.
 
 | Role | Library | Licence | Notes |
 | --- | --- | --- | --- |
-| Piano | [SplendidGrandPiano](https://github.com/sfzinstruments/SplendidGrandPiano) | Public domain | Steinway, four velocity layers |
+| Piano | [SalamanderGrandPiano](https://github.com/sfzinstruments/SalamanderGrandPiano) | CC BY 3.0 | Yamaha C5, 16 velocity layers, string resonance and hammer release samples. Credit Alexander Holm |
+| Piano, smaller (`-Only splendid`) | [SplendidGrandPiano](https://github.com/sfzinstruments/SplendidGrandPiano) | Public domain | Steinway, four velocity layers, no credit needed |
 | Upright bass | [dsmolken.double-bass](https://github.com/sfzinstruments/dsmolken.double-bass) | CC0 | 1958 Rubner, pizzicato samples only |
 | Saxophone | [MTG.SoloSax](https://github.com/sfzinstruments/MTG.SoloSax) | CC BY 4.0 | Alto and tenor. Credit MTG (freesound) and kinwie |
 | Drums | [virtuosity_drums](https://github.com/sfzinstruments/virtuosity_drums) | CC0 | Jazz kit, "mid" mic position only |
@@ -23,7 +24,7 @@ Check each library's own licence before you release anything. Any open SFZ libra
 {"tool": "convert_sfz", "sfz": "dsmolken.double-bass/d_smolken_rubner_bass_pizz.sfz", "output": "bass.dspreset"}
 ```
 
-`convert_sfz` writes a `.dspreset` into the workspace with absolute sample paths. It handles `#define`, `#include`, scope inheritance, key names, velocity layers, loops, offsets, tuning, volume, pan, envelopes and round robin. It keeps the regions that are active at the SFZ's default controller values, and it skips release triggers, keyswitched articulations, cc-gated layers, LFOs and filters. Missing sample files are skipped and counted. Use `only` to keep part of a library, for example `"only": "/mid/"` or `"only": "alt_"`. The SFZ file, its includes and its samples must sit inside `LMMS_SAMPLE_LIBRARIES`.
+`convert_sfz` writes a `.dspreset` into the workspace with absolute sample paths. It handles `#define`, `#include`, scope inheritance, key names, velocity layers, loops, offsets, tuning, volume, pan, envelopes and round robin. It keeps the regions that are active at the SFZ's default controller values and default keyswitch (`sw_default`), applies controller modulation of envelopes, volume, tuning and velocity tracking at those defaults (with the standard SFZ curves), and reads `#include` written inside a header line. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends. It skips other keyswitched articulations, cc-gated layers, regions triggered by a controller (such as pedal noise), LFOs and filters. Missing sample files are skipped and counted. Use `only` to keep part of a library, for example `"only": "/mid/"` or `"only": "alt_"`. The SFZ file, its includes and its samples must sit inside `LMMS_SAMPLE_LIBRARIES`.
 
 Then export the arrangement and render it:
 

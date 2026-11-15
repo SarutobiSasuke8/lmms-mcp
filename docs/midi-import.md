@@ -67,13 +67,32 @@ Phrase lengths matter most. Read them from the score where you can: a phrase usu
 
 ```json
 { "midi": "gymnopedie-1-performed.mid", "outputDirectory": "gymnopedie-1-render", "durationSeconds": 224,
-  "tracks": [{ "track": "Piano", "name": "piano", "instrument": "decent-sampler", "dspreset": "splendid-piano.dspreset",
+  "tracks": [{ "track": "Piano", "name": "piano", "instrument": "decent-sampler", "dspreset": "salamander-grand.dspreset",
     "width": 0.55,
     "eq": [{ "type": "highpass", "hz": 35 }, { "type": "peak", "hz": 300, "db": -2, "q": 0.8 }, { "type": "highshelf", "hz": 3500, "db": 3 }],
     "reverb": { "wet": 0.14, "roomSize": 0.65, "damping": 0.5, "width": 0.8, "preDelayMs": 20 } }] }
 ```
 
 Each track also takes `width` (0 is mono, 1 unchanged) and up to six `eq` bands, applied after the instrument and before the reverb. The Splendid Grand's samples are wide: at full width the mix measured a stereo correlation of 0.13 and thinned out in mono, and at 0.55 it measured 0.58. Pedalboard's reverb has a strong wet output, so keep `wet` around 0.1 to 0.2.
+
+### Rooms, halls and churches
+
+For a long, smooth tail use `space` instead of `reverb`. It convolves the track with a synthetic impulse response: early reflections, then a tail whose highs die before its lows.
+
+| type | Decay | Pre-delay | Character |
+| --- | --- | --- | --- |
+| room | 0.9 s | 6 ms | Close and dry |
+| hall | 2.4 s | 22 ms | Concert hall |
+| church | 4.2 s | 30 ms | Stone, darker, long |
+| cathedral | 7 s | 45 ms | Very long and distant |
+
+`wetDb` is the loudness of the space against the dry sound, measured, so -10 means the same in every space: -14 is subtle, -10 spacious, -6 distant. `width` (default 0.6) keeps the tail from thinning out in mono. Add the decay time to `durationSeconds`.
+
+```json
+"space": { "type": "church", "wetDb": -10 }
+```
+
+The level is measured because a long impulse builds up on sustained notes: in the first test a church at an unmeasured -8 dB made a soft piano 5 dB louder and nearly cancelled in mono.
 
 ## Sources and rights
 

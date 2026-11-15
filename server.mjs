@@ -321,11 +321,11 @@ tool('list_external_tools', 'Discover optional renderer dependencies, VST3 instr
       { name: 'FFmpeg', use: 'OGG export', env: 'LMMS_FFMPEG', url: 'https://ffmpeg.org/download.html' },
       { name: 'Fathom Synth', use: 'Optional synth worklet', env: 'LMMS_FATHOM_WORKLET' },
       { name: 'LMMS Agent Bridge', use: 'Optional live editing on Windows', env: 'LMMS_LIVE_PIPE', url: 'https://github.com/Jx9x/lmms-mcp-bridge' },
-      { name: 'FluidSynth', use: 'Standalone SF2/SF3 MIDI render; manual companion workflow', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
+      { name: 'FluidSynth', use: 'SF2/SF3 MIDI render via render_soundfont. Set LMMS_FLUIDSYNTH or have fluidsynth on PATH. See docs/soundfont.md.', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
     ],
     setup: 'On Windows x64 with Python 3.12, run setup-vst3-windows.ps1 from the package. See the README for manual setup.' };
 });
-tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments, up to 10 minutes, with an optional reverb per track. Return aligned stereo WAVs, a mix and a reproducible assignment manifest. Leave a few seconds after the last note for the release and reverb tail.', {
+tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments, up to 10 minutes, with an optional EQ, width, reverb and acoustic space (room, hall, church or cathedral) per track. Return aligned stereo WAVs, a mix and a reproducible assignment manifest. Leave a few seconds after the last note for the release and reverb tail.', {
   midi: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
   outputDirectory: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i),
   durationSeconds: z.number().min(0.1).max(600),
@@ -343,6 +343,13 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
       type: z.enum(["highpass", "lowshelf", "highshelf", "peak"]), hz: z.number().min(20).max(20000),
       db: z.number().min(-18).max(18).default(0), q: z.number().min(0.1).max(10).default(0.7),
     })).max(6).default([]).describe("EQ after the instrument, before the reverb. For example a highshelf at 3500 Hz +3 dB to brighten a soft piano."),
+    space: z.object({
+      type: z.enum(["room", "hall", "church", "cathedral"]).describe("room 0.9 s, hall 2.4 s, church 4.2 s, cathedral 7 s of decay."),
+      wetDb: z.number().min(-40).max(0).default(-10).describe("Loudness of the space against the dry sound, measured, so it means the same in every space. -14 is subtle, -10 is spacious, -6 is distant."),
+      width: z.number().min(0).max(1).default(0.6).describe("Stereo width of the space: 0 is a mono tail, 1 fully wide. Wider tails thin out in mono."),
+      seconds: z.number().min(0.3).max(12).optional().describe("Decay time, to override the preset."),
+      predelayMs: z.number().min(0).max(200).optional(), brightness: z.number().min(0).max(1).optional().describe("How long the highs ring. Stone churches are darker than halls."),
+    }).optional().describe("A convolution reverb from a synthetic impulse response of a real-sized space. Smoother than reverb for long tails; use one or the other. Add the decay time to durationSeconds so the tail is kept."),
     reverb: z.object({
       wet: z.number().min(0).max(1).default(0.22), roomSize: z.number().min(0).max(1).default(0.7),
       damping: z.number().min(0).max(1).default(0.5), width: z.number().min(0).max(1).default(1),
@@ -710,6 +717,7 @@ tool('list_presets', 'List installed factory presets: native .xpf paths, plus Zy
 
 // ---------- rendering ----------
 const renderLimit = Number(process.env.LMMS_RENDER_TIMEOUT_SECONDS) || null;
+const nightlyDeadline = Number(process.env.LMMS_NIGHTLY_DEADLINE_MS) || null;
 function forRender(doc) {
   const copy = parse(xml.serializeToString(doc));
   const list = tracks(copy);
@@ -735,10 +743,14 @@ async function renderDoc(doc, { loop = true, prepared = false } = {}) {
   try {
     const project = path.join(temp, 'render.mmp'), rendered = path.join(temp, 'render.wav');
     await writeFile(project, xml.serializeToString(copy));
+    const remaining = nightlyDeadline === null ? Infinity : nightlyDeadline - Date.now();
+    if (remaining <= 0) throw new Error('Recipe time budget exceeded');
+    const timeout = Math.min(seconds * 1000, remaining);
     try {
       await run(lmms, ['render', project, '-s', '48000', '-f', 'wav', ...(loop ? ['-l'] : []), '-o', rendered],
-        { cwd: root, timeout: seconds * 1000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+        { cwd: root, timeout, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     } catch (error) {
+      if (error.killed && timeout === remaining) throw new Error('Recipe time budget exceeded');
       if (error.killed) throw new Error(`LMMS did not finish rendering within ${seconds} seconds. Set LMMS_RENDER_TIMEOUT_SECONDS to allow longer.`);
       throw new Error(error.code === 'ENOENT' ? `LMMS was not found at ${lmms}. Set LMMS_EXECUTABLE.` : 'LMMS render failed: ' + String(error.message).split('\n')[0]);
     }

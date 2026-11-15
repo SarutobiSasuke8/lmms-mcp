@@ -7,6 +7,9 @@ Handles #define, #include, <control>/<global>/<master>/<group>/<region> inherita
 key names, velocity ranges, loops, offsets, tuning, volume, pan, ampeg, round robin (seq_*), and
 keeps only regions whose cc/keyswitch conditions hold at the SFZ's default controller values.
 A keyswitched library keeps its default articulation (sw_default). Skipped: trigger=release, other keyswitched\narticulations, cc-gated and cc-triggered layers, LFOs, filters and effects.
+*_onccN modulation of envelopes, volume, pan, tune, offset and velocity tracking is applied at the default
+controller values, with the standard SFZ curves 0 to 6. With --keep-releases, release samples become Decent
+Sampler release groups.
 """
 import re, sys, os, argparse
 from xml.sax.saxutils import quoteattr
@@ -161,8 +164,30 @@ def active(r, cc, keep_releases):
     return True
 
 
+MODULATED = {"ampeg_attack": 0.0, "ampeg_decay": 0.0, "ampeg_sustain": 100.0, "ampeg_release": 0.05,
+             "amp_veltrack": 100.0, "volume": 0.0, "pan": 0.0, "tune": 0.0, "offset": 0.0}
+# The standard SFZ controller curves 0 to 6. Custom <curve> headers fall back to linear.
+CURVES = {0: lambda x: x, 1: lambda x: 2 * x - 1, 2: lambda x: 1 - x, 3: lambda x: 1 - 2 * x,
+          4: lambda x: x * x, 5: lambda x: x ** 0.5, 6: lambda x: (1 - x) ** 0.5}
+
+
+def apply_cc_defaults(r, cc):
+    """Fold *_onccN modulation into the base opcode at the default controller values."""
+    out = dict(r)
+    for k, v in r.items():
+        m = re.fullmatch(r"(\w+?)_on(hd)?cc(\d+)", k)
+        if not m or m.group(1) not in MODULATED:
+            continue
+        base, number = m.group(1), int(m.group(3))
+        x = cc.get(number, 0) / 127
+        curve = int(float(r.get(f"{base}_curvecc{number}", 0)))
+        out[base] = str(float(out.get(base, MODULATED[base])) + float(v) * CURVES.get(curve, CURVES[0])(x))
+    return out
+
+
 def convert(sfz, root, absolute, keep_releases, only):
     control, regions, cc = parse(sfz)
+    regions = [apply_cc_defaults(r, cc) for r in regions]
     default_path = control.get("default_path", "").replace("\\", "/")
     sfz_dir = os.path.dirname(sfz)
     groups, skipped, missing = {}, 0, []
@@ -207,14 +232,16 @@ def convert(sfz, root, absolute, keep_releases, only):
             attrs.update(seqMode="round_robin", seqLength=int(r["seq_length"]), seqPosition=int(r.get("seq_position", 1)))
         g = {"attack": float(r.get("ampeg_attack", 0)), "decay": float(r.get("ampeg_decay", 0.0)),
              "sustain": float(r.get("ampeg_sustain", 100)) / 100, "release": max(float(r.get("ampeg_release", 0.05)), 0.01),
-             "ampVelTrack": float(r.get("amp_veltrack", 100)) / 100}
+             "ampVelTrack": max(0.0, min(1.0, float(r.get("amp_veltrack", 100)) / 100)),
+             "trigger": "release" if r.get("trigger") in ("release", "release_key") else "attack"}
         if g["decay"] > 30:
             g["decay"] = 30.0
         groups.setdefault(tuple(sorted(g.items())), []).append(attrs)
     xml = []
     count = 0
     for gk, samples in groups.items():
-        gattrs = " ".join(f"{k}={quoteattr(str(round(v, 4)))}" for k, v in gk)
+        gattrs = " ".join(f"{k}={quoteattr(str(round(v, 4) if isinstance(v, float) else v))}"
+                          for k, v in gk if not (k == "trigger" and v == "attack"))
         xml.append(f"    <group {gattrs}>")
         for a in samples:
             xml.append("      <sample " + " ".join(f"{k}={quoteattr(str(v))}" for k, v in a.items()) + "/>")
