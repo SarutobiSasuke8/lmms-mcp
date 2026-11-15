@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Add optional `render_atelier` and `render_theremin` stereo instrument stem tools.
+
 - Time-stretch WAV loops and chop drum breaks with sixteenth-note or transient slicing, pattern sequencing and a slice manifest.
 - `lmms-compose nightly` renders and ranks soundtrack cues unattended and builds dated audition pages.
 - `scale_lock`, `arpeggiate` and `note_probability`: edits (and `apply_edits` steps) that snap a track to a named scale, turn chords into arpeggios, and drop or vary notes by seeded chance. Drum tracks are skipped unless named.

@@ -7,22 +7,24 @@ const name = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
 const missing = 'Install or link atelier-dsp locally, or set LMMS_ATELIER_DSP to its absolute repository path.';
 const maxWavBytes = 32 * 1024 * 1024;
 
-export async function loadAtelierGroovebox(directory = process.env.LMMS_ATELIER_DSP) {
+export async function loadAtelierModule(name, entry, directory = process.env.LMMS_ATELIER_DSP) {
   if (directory && !path.isAbsolute(directory)) throw new Error('LMMS_ATELIER_DSP must be an absolute directory path.');
   const source = directory
-    ? pathToFileURL(path.join(directory, 'src', 'groovebox', 'index.js')).href
-    : 'atelier-dsp/groovebox';
+    ? pathToFileURL(path.join(directory, entry)).href
+    : `atelier-dsp/${name}`;
   try {
     return await import(source);
   } catch (error) {
-    if (error.code === 'ERR_MODULE_NOT_FOUND' && (directory ? error.url === source : error.message.includes("package 'atelier-dsp'"))) {
+    if ((error.code === 'ERR_MODULE_NOT_FOUND' && (directory ? error.url === source : error.message.includes("package 'atelier-dsp'"))) || error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
       throw new Error(missing, { cause: error });
     }
     throw error;
   }
 }
 
-async function readWorkspaceFile(root, input, limit) {
+export const loadAtelierGroovebox = directory => loadAtelierModule('groovebox', 'src/groovebox/index.js', directory);
+
+export async function readWorkspaceFile(root, input, limit) {
   const realRoot = await realpath(root);
   const filename = await realpath(path.join(realRoot, input));
   const relative = path.relative(realRoot, filename);
