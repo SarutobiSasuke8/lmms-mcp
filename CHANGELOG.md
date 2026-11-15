@@ -8,6 +8,10 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 - `build_timeline_page`: one HTML page that shows a song as a DAW would, with each stem as a lane under a bar ruler, sections and DJ effects as blocks, synced playback with mute and solo, section looping, and notes pinned to bars that can be copied back. The library page links each track to its timeline.
 
+### Changed
+
+- `compose_piece` now plans a form to fit the length: theme, contrast, a solo that opens by quoting the theme, a varied return and an ending, with the accompaniment, bass and drums changing from section to section. Its result gains `form` and `structure`, and each section has a `kind`. `compose_batch` ranks with a structure check. New accompaniment style `held`.
+
 ## 0.9.0 - 2026-11-15
 
 No breaking changes. Every 0.8.1 tool keeps its name and its required arguments.

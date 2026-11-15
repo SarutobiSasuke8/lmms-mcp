@@ -9,9 +9,28 @@
 - **Harmony.** `write_accompaniment` under the melody's register, plus a held pad in some styles.
 - **Bass.** Roots, a pulse, octaves, a walking line or a syncopated figure, starting on the root at every chord change.
 - **Drums.** A groove, a fill at the end of each phrase, a crash after it, and a quiet intro.
-- **Form.** A two-bar intro without the lead, the body, and an ending that rests on the subdominant and settles on the tonic.
+- **Form.** Chosen to fit the length. A short piece states its theme and restates it. From about a minute it adds a solo, and longer pieces add a contrasting section, a second statement of the theme and a bridge. See the table below.
 
 Every part follows the melody's phrase plan, so the band swells where the tune does.
+
+## Form
+
+| Bars | Form |
+| --- | --- |
+| 8 to 13 | theme, ending |
+| 14 to 18 | intro, theme, return, ending |
+| 19 to 22 | intro, theme, solo, return, ending |
+| 23 to 26 | intro, theme, solo (8 bars), return, ending |
+| 27 to 38 | intro, theme, contrast, solo, return, ending |
+| 39 and up | the theme is stated twice, the solo stretches to 16 bars, and a bridge comes before the return |
+
+- **Theme.** The melody writer's tune. When it is stated twice, a quiet second voice sits under the long notes the second time.
+- **Contrast and bridge.** Another chord progression and new material from the same idea: the reply rhythm leads and the contour turns over.
+- **Solo.** Over the theme's chords. It opens by quoting the first two bars of the theme, then `write_solo` takes over: busier, wider, rising to its own peak, with a breath before the return.
+- **Return.** The theme again, now cadencing home, with a second voice under its last phrase.
+- **The band follows.** The accompaniment changes pattern in the contrast, drops to one held chord a bar under the solo and is fuller in the return. The pad waits for the contrast. The bass gets busier under the solo. A snare build leads into the return and a crash marks each new section.
+
+`compose_piece` returns the form, the sections and a structure check. The check warns when a section has the same chords and nearly the same rhythm and density as the one before it, or when a long piece has no solo or no contrast. `compose_batch` takes six points off for each warning.
 
 ## Styles
 
