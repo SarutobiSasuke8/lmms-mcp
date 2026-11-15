@@ -41,6 +41,9 @@ Every part follows the melody's phrase plan, so the band swells where the tune d
 | `battle` | 152 | Minor key, busy lead, octave bass |
 | `ballad` | 76 | Simple tune over held arpeggios |
 | `swing` | 126 | Laid-back tune, walking bass, ride pattern |
+| `reggae` | 78 | Horn tune, off-beat guitar skank, bubbling organ, heavy melodic bass, one-drop beat |
+| `dub` | 72 | Steppers drums, sub bass, skank with fading echoes, chords dropping out under the solo, a siren |
+| `dubstep` | 140 | Half-time drums, retriggered wobble bass, held chords, a siren into each drop |
 
 All styles use stock LMMS sounds, so they render on any install. Replace any part's sound with `voices`, and set `key`, `bpm` and `seconds` or `bars` yourself.
 
@@ -79,7 +82,16 @@ The scores catch faults: a masked melody, a muddy mix, a tune that never rests. 
 
 ## The parts on their own
 
-`writeProgression`, `writeBass` and `writeDrums` are exported from `tools/compose.mjs` for scripts. Bass styles: `roots`, `pulse`, `octaves`, `walking`, `syncopated`. Drum styles: `rock`, `four`, `halftime`, `ballad`, `chip`, `swing`, `none`.
+`writeProgression`, `writeBass` and `writeDrums` are exported from `tools/compose.mjs` for scripts. Bass styles: `roots`, `pulse`, `octaves`, `walking`, `syncopated`, `reggae`, `sub`, `wobble`. Drum styles: `rock`, `four`, `halftime`, `ballad`, `chip`, `onedrop`, `rockers`, `steppers`, `dubstep`, `swing`, `none`.
+
+## Reggae, dub and dubstep
+
+- **Skank and bubble.** `write_accompaniment` has two off-beat styles. `skank` plays a short chord on every off-beat, as a reggae guitar or piano does. `bubble` adds quiet low notes either side, as a reggae organ does. Neither plays on the beat: that belongs to the bass and drums.
+- **Dub echo.** `echo` repeats the last off-beat chord of each bar on dotted eighths, fading each time. It is written as notes, so it works with any sound and survives a render through sampled instruments.
+- **Drums.** `onedrop` puts the kick and the rim together on beat three and leaves beat one empty. `rockers` adds a kick on one, `steppers` plays four to the bar. `dubstep` is half-time at 140: kick on one, snare on three.
+- **Bass.** `reggae` plays the root, leaves space, then answers with a short figure. `sub` holds one long low note. `wobble` retriggers the root at a rate that changes every half bar. It stands in for a filter wobble; for the real thing, automate the filter cutoff of the bass track with `automate_track`.
+- **Drop-out and siren.** In `dub` the chords fall away under the solo, leaving one echoing chord, the bass and the drums. `dub` and `dubstep` add a siren track that rises in the bar before the solo and the return.
+- The stock sounds are a synth trumpet, a plucked synth for the skank and a synth organ. For real instruments, render through a sampled trumpet, clean guitar, drawbar organ and electric bass.
 
 ## Limits
 

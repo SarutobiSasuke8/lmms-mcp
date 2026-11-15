@@ -17,7 +17,7 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   count: { type: 'string' }, seed: { type: 'string' }, name: { type: 'string' }, help: { type: 'boolean', short: 'h' },
 } });
 if (values.help) {
-  console.log('Usage: lmms-compose [recipe.json] [--style chiptune|adventure|battle|ballad|swing] [--key "D minor"] [--bpm 120]\n       [--seconds 60 | --bars 32] [--count 6] [--seed 1] [--name piece]\nComposes --count seeds, renders each with LMMS and prints them ranked by measured checks.\n       lmms-compose nightly <recipes-dir|list.json> --out <dir> [--budget-seconds 1800] [--min-free-mib 1024] [--keep-days N]');
+  console.log('Usage: lmms-compose [recipe.json] [--style chiptune|adventure|battle|ballad|swing|reggae|dub|dubstep] [--key "D minor"] [--bpm 120]\n       [--seconds 60 | --bars 32] [--count 6] [--seed 1] [--name piece]\nComposes --count seeds, renders each with LMMS and prints them ranked by measured checks.\n       lmms-compose nightly <recipes-dir|list.json> --out <dir> [--budget-seconds 1800] [--min-free-mib 1024] [--keep-days N]');
   process.exit(0);
 }
 async function connect(workspace, deadline) {
