@@ -1184,15 +1184,29 @@ tool('list_instruments', 'Discover what this installation can play: built-in voi
       models: ['fathom', 'vesper', 'halo'], tool: 'render_fathom_track' },
   };
 });
-edit('set_native_instrument', 'Load an installed stock LMMS instrument at its default settings. Keeps existing notes, mixer routing and track controls.', {
+edit('set_native_instrument', 'Load an installed stock LMMS instrument at its default settings. Keeps existing notes, mixer routing and track controls. For sf2player, optionally pass a SoundFont file plus bank and patch.', {
   trackName: z.string(), instrument: z.enum(Object.keys(instruments)),
-}, async (doc, { trackName, instrument }) => {
+  soundfont: z.string().min(5).max(400).regex(/\.sf[23]$/i).optional().describe('For sf2player: path to .sf2/.sf3 (workspace-relative or absolute).'),
+  bank: z.number().int().min(0).max(128).optional().describe('For sf2player: bank number.'),
+  patch: z.number().int().min(0).max(127).optional().describe('For sf2player: patch / preset number.'),
+}, async (doc, { trackName, instrument, soundfont, bank, patch }) => {
   if (!(await installedInstrumentIds()).includes(instrument)) throw new Error('Instrument plugin was not found in LMMS_PLUGINS');
   const target = instrumentOf(doc, trackName);
   const [previous] = children(target, 'instrument');
   if (linked(previous)) throw new Error('Existing instrument has linked controls');
   if (previous) target.removeChild(previous);
-  add(add(target, 'instrument', { name: instrument }), instrument);
+  const inst = add(add(target, 'instrument', { name: instrument }), instrument);
+  // Store SoundFont parameters for sf2player so the instrument is editable inside LMMS
+  if (instrument === 'sf2player' && soundfont) {
+    const key = add(inst, 'key');
+    const setAttr = (name, value) => {
+      const attr = add(key, 'attribute', { name });
+      attr.setAttribute('value', String(value));
+    };
+    setAttr('path', soundfont);
+    if (bank !== undefined) setAttr('bank', bank);
+    if (patch !== undefined) setAttr('patch', patch);
+  }
 });
 
 // ---------- mixer, effects, automation ----------

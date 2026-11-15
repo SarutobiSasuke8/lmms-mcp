@@ -50,3 +50,14 @@ Returns `.sf2` and `.sf3` files found in the workspace and in `LMMS_SOUNDFONTS` 
 ## Instrument selection
 
 MIDI program-change events in the file are honoured by FluidSynth. The optional `bank` and `preset` arguments are reserved for a future release and currently have no effect. Put the program change in the MIDI for reliable instrument selection.
+
+
+## Native LMMS sf2player tracks
+
+`set_native_instrument` can switch a track to the stock `sf2player` and store a SoundFont file plus bank and patch:
+
+```
+set_native_instrument({ trackName: "Lead", instrument: "sf2player", soundfont: "pianos/Salamander.sf2", bank: 0, patch: 0 })
+```
+
+The instrument lives in the `.mmp` / `.mmpz` and remains editable. `render_soundfont` (FluidSynth) remains available as a non-destructive render fallback.
