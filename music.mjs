@@ -152,6 +152,10 @@ function fromChords(spec, ticks, step) {
   return notes;
 }
 
+export function swingTick(tick, step, amount) {
+  return tick % (step * 2) === step ? tick + Math.round(step * amount) : tick;
+}
+
 // Resolve a pattern spec to plain notes. Exactly one of notes, steps, melody or chords must be present.
 export function expandPattern(spec) {
   const sources = ['notes', 'steps', 'melody', 'chords'].filter(key => spec[key] !== undefined);
@@ -166,7 +170,7 @@ export function expandPattern(spec) {
     const step = 192 / perBar;
     notes = sources[0] === 'steps' ? fromSteps(source, ticks, step) : sources[0] === 'melody' ? fromMelody(source, ticks, step) : fromChords(source, ticks, step);
     const swing = source.swing ?? 0;
-    if (swing) for (const n of notes) if (Math.round(n.tick / step) % 2 === 1 && n.tick % step === 0) n.tick += Math.round(step * swing);
+    if (swing) for (const n of notes) n.tick = swingTick(n.tick, step, swing);
     if (source.humanize) {
       const next = random(source.seed ?? 1);
       for (const n of notes) n.velocity += Math.round((next() - 0.5) * 2 * source.humanize);

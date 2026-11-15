@@ -6,6 +6,8 @@ import { parseKey, pitchClassName } from './motif.mjs';
 import { writeMelody, writeAccompaniment, chordPlan, rng } from './melody.mjs';
 import { lintModel, modelFromDoc, qualityScore } from './arranger-lint.mjs';
 import { writeSolo } from './solo.mjs';
+import { swingTick } from '../music.mjs';
+import { getPersona } from './personas.mjs';
 
 const BAR = 192, STEP = 12;
 const mod = (a, n) => ((a % n) + n) % n;
@@ -229,16 +231,43 @@ const alternates = { // how each part changes from the theme, so every section s
   drums: { contrast: { onedrop: 'rockers', rockers: 'steppers', steppers: 'onedrop', dubstep: 'dubstep', rock: 'halftime', four: 'halftime', chip: 'halftime', halftime: 'rock', ballad: 'ballad', swing: 'swing', none: 'none' } },
 };
 
-export function composePiece({ style: styleName = 'adventure', key, bpm, bars, seconds, seed = 1, voices = {} } = {}) {
+function personaKeys(persona, keys) {
+  if (!persona) return keys;
+  if (persona.harmony.keys) return persona.harmony.keys;
+  const supported = [];
+  for (const mode of [...persona.harmony.modes, ...persona.harmony.scales]) {
+    try { supported.push(parseKey(`C ${mode}`).mode); } catch { /* A future harmony engine may recognise this name. */ }
+  }
+  return supported.length ? keys.map((key, index) =>
+    `${key.split(' ')[0]} ${supported[index % supported.length]}`) : keys;
+}
+
+export function composePiece({ style: requestedStyle, persona, key, bpm, bars, seconds, seed = 1, voices = {} } = {}, { personasDirectory } = {}) {
+  const profile = persona === undefined ? undefined : getPersona(persona, personasDirectory);
+  const pattern = profile?.drums.patterns;
+  const styleName = requestedStyle ?? (Object.hasOwn(styles, pattern) ? pattern : 'adventure');
+  if (!Object.hasOwn(styles, styleName)) throw new Error(`Unknown style "${styleName}". Use one of: ${styleNames.join(', ')}`);
   const style = styles[styleName];
-  if (!style) throw new Error(`Unknown style "${styleName}". Use one of: ${styleNames.join(', ')}`);
-  const random = rng(seed + 11), tempo = bpm ?? style.bpm, keyName = key ?? random.pick(style.keys);
+  const drumsStyle = requestedStyle === undefined && drumStyles.includes(pattern) ? pattern : style.drums;
+  const bassStyle = bassStyles.includes(profile?.bass.archetype) ? profile.bass.archetype : style.bass;
+  const melodyOptions = { ...style.melody };
+  if (profile) {
+    melodyOptions.phraseBars = profile.arrangement.phraseBars;
+    if (profile.groove.humanizeMs !== undefined) {
+      melodyOptions.feel = { humanize: Math.round(profile.groove.humanizeMs * (bpm ?? profile.tempo.default) * 48 / 60000) };
+    }
+  }
+  const random = rng(seed + 11), tempo = bpm ?? profile?.tempo.default ?? style.bpm;
+  const keyName = key ?? random.pick(personaKeys(profile, style.keys));
   if (bars !== undefined && seconds !== undefined) throw new Error('Give bars or seconds, not both');
   const total = bars ?? Math.max(8, Math.round((seconds ?? 60) * tempo / 240));
   if (total < 8 || total > 200) throw new Error('A piece needs between 8 and 200 bars');
   const parsedKey = parseKey(keyName), minor = parsedKey.scale[2] === 3;
   const family = templates[minor ? 'minor' : 'major'], pickRandom = rng(seed + 101);
-  const chosen = { A: pickRandom.pick(family.A), B: pickRandom.pick(family.B) };
+  const progressions = profile?.harmony.progressions;
+  const chosen = progressions?.length
+    ? { A: pickRandom.pick(progressions), B: pickRandom.pick(progressions) }
+    : { A: pickRandom.pick(family.A), B: pickRandom.pick(family.B) };
   const tonic = romanToChord(minor ? 'i' : 'I', parsedKey), sub = romanToChord(minor ? 'iv' : 'IV', parsedKey), dominant = romanToChord('V', parsedKey);
   const sections = planForm(total);
   const lastBody = sections.at(-2);
@@ -247,7 +276,7 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
     const template = ['contrast', 'bridge'].includes(section.kind) ? chosen.B : chosen.A;
     if (section.kind === 'ending') section.chords = Array.from({ length: section.bars }, (_, i) => section.bars > 1 && i === 0 ? sub : tonic);
     else {
-      section.chords = Array.from({ length: section.bars }, (_, i) => romanToChord(template[i % 4], parsedKey));
+      section.chords = Array.from({ length: section.bars }, (_, i) => romanToChord(template[i % template.length], parsedKey));
       if (section.kind !== 'intro' && section.bars >= 4) section.chords[section.bars - 1] = dominant;
       if (section === lastBody && section.bars >= 2) { section.chords[section.bars - 2] = dominant; section.chords[section.bars - 1] = tonic; }
     }
@@ -268,14 +297,14 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
     const at = section.startBar, n = section.bars, next = sections[index + 1];
     let notes = [], phrases = [];
     if (section.kind === 'theme' || section.kind === 'theme again') {
-      const written = writeMelody({ key: keyName, chords: section.chords, bars: n, seed: section.kind === 'theme' ? seed : seed + 5, ...style.melody, ...(motif ? { motif } : {}) });
+      const written = writeMelody({ key: keyName, chords: section.chords, bars: n, seed: section.kind === 'theme' ? seed : seed + 5, ...melodyOptions, ...(motif ? { motif } : {}) });
       if (!theme) { theme = written; motif = written.motif; }
       notes = written.notes; phrases = written.plan; lastMain = written.notes.at(-1).midi;
       if (section.kind === 'theme again') notes = [...written.notes, ...secondVoice(written.notes, section.chords)]; // fuller the second time
     } else if (section.kind === 'contrast' || section.kind === 'bridge') {
       // New material from the same idea: the reply rhythm leads and the contour turns over.
       const turned = { rhythm: motif.reply, contour: motif.reply.map((_, i) => -(motif.contour[i % motif.contour.length])), reply: motif.rhythm };
-      const written = writeMelody({ key: keyName, chords: section.chords, bars: n, seed: seed + 17 + index, ...style.melody, motif: turned });
+      const written = writeMelody({ key: keyName, chords: section.chords, bars: n, seed: seed + 17 + index, ...melodyOptions, motif: turned });
       notes = written.notes; phrases = written.plan.map(p => ({ ...p, liftDegrees: Math.max(2, p.liftDegrees), climax: false }));
     } else if (section.kind === 'solo') {
       // The solo starts by quoting the theme, then loosens it: busier, wider, rising to its own peak, and it breathes before the return.
@@ -293,7 +322,7 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
       phrases = Array.from({ length: Math.ceil(n / 2) }, (_, i) => ({ phrase: i, bar: i * 2, bars: Math.min(2, n - i * 2), role: i === 0 ? 'quote' : 'solo', liftDegrees: Math.min(4, 1 + i), climax: false }));
     } else if (section.kind === 'return') {
       // The theme again, the same seed and idea, now cadencing home, with a second voice under its last phrase for weight.
-      const written = writeMelody({ key: keyName, chords: section.chords, bars: n, seed, ...style.melody, motif });
+      const written = writeMelody({ key: keyName, chords: section.chords, bars: n, seed, ...melodyOptions, motif });
       const final = written.plan.at(-1);
       const louder = written.notes.map(note => ({ ...note, velocity: Math.min(127, note.velocity + 4) }));
       notes = [...louder, ...secondVoice(louder, section.chords, final.bar * BAR)];
@@ -320,18 +349,33 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
     }
     if (style.pad && !dropped && (padAlways ? kindKey !== 'intro' : ['contrast', 'return', 'ending'].includes(kindKey)))
       pad.push(...shift(writeAccompaniment({ chords: section.chords, bars: n, seed: seed + 1, plan: local, ...padSpec, ...(kindKey === 'ending' ? { style: 'block' } : {}), final: !next }).notes, at));
-    if (kindKey !== 'intro') bass.push(...shift(writeBass({ chords: section.chords, bars: n, seed: seed + index, style: alternates.bass[kindKey]?.[style.bass] ?? style.bass, plan: local, final: !next }).notes, at));
-    const beat = writeDrums({ bars: n, seed: seed + index, style: alternates.drums[kindKey]?.[style.drums] ?? style.drums, plan: local, quietBars: kindKey === 'intro' ? n : 0, ending: !next,
+    if (kindKey !== 'intro') bass.push(...shift(writeBass({ chords: section.chords, bars: n, seed: seed + index, style: alternates.bass[kindKey]?.[bassStyle] ?? bassStyle, plan: local, final: !next }).notes, at));
+    const beat = writeDrums({ bars: n, seed: seed + index, style: alternates.drums[kindKey]?.[drumsStyle] ?? drumsStyle, phraseBars: profile?.groove.fillInterval, plan: local, quietBars: kindKey === 'intro' ? n : 0, ending: !next,
       build: next?.kind === 'return' || (next?.kind === 'solo' && n >= 8), crashAtStart: !['intro', 'theme', 'ending'].includes(kindKey) }).parts;
     for (const part of Object.keys(drums)) drums[part].push(...shift(beat[part], at));
   });
-  const sound = { ...style.voices, ...voices };
+  const fallbacks = Object.fromEntries((profile?.signatureSounds ?? []).map(({ role, fallback }) => [role, fallback]));
+  const sound = { ...style.voices, ...fallbacks, ...voices };
+  const swing = profile?.swing.amount ?? 0;
+  if (swing) {
+    for (const notes of [bass, ...Object.values(drums)]) {
+      for (const note of notes) {
+        note.tick = Math.min(total * BAR - 1, swingTick(note.tick, STEP, swing));
+        note.length = Math.min(note.length, total * BAR - note.tick);
+      }
+    }
+  }
   const track = (name, role, slot, notes) => notes?.length ? { name, role, pan: 0, ...sound[slot], patterns: [{ name, bar: 0, bars: total, notes: [...notes].sort((a, b) => a.tick - b.tick) }] } : null;
   const tracks = [track('Lead', 'lead', 'lead', lead), track('Harmony', 'harmony', 'harmony', harmony), track('Pad', 'texture', 'pad', pad), track('Bass', 'bass', 'bass', bass),
     track('Kick', 'drums', 'kick', drums.kick), track('Snare', 'drums', 'snare', drums.snare), track('Hat', 'drums', 'hat', drums.hat), track('Crash', 'drums', 'crash', drums.crash), track('Siren', 'fx', 'siren', siren)].filter(Boolean);
   const out = sections.map(({ chords: sectionChords, ...section }) => section);
   const result = { style: styleName, key: parsedKey.name, bpm: tempo, seed, lengthBars: total, lengthSeconds: Number((total * 240 / tempo).toFixed(3)), masterVolume: 80,
     form: out.map(section => section.kind).join(', '), chords, sections: out, plan, motif, tune: tuneScore(theme.notes, theme.plan), tracks };
+  if (profile) {
+    result.persona = profile.id;
+    result.mix = { targetLufs: profile.mix.targets.lufs, ceilingDb: profile.mix.targets.truePeakDb };
+    if (profile.tempo.timeSignature !== '4/4') result.personaWarnings = ['The current composer uses 4/4; the persona metre is retained for future arrangers.'];
+  }
   result.structure = structureCheck(result);
   return result;
 }
@@ -384,18 +428,19 @@ export function tuneScore(notes, plan = []) {
   return { score: Math.round(parts.reduce((sum, [, points]) => sum + points, 0)), parts: parts.map(([name, points, detail]) => ({ name, points: Number(points.toFixed(1)), detail })) };
 }
 
-export function register({ tool, z, dsp, root, schemas, project, render, moduleGuidance }) {
+export function register({ tool, z, dsp, root, schemas, project, render, moduleGuidance, personasDirectory }) {
   moduleGuidance.push('compose_piece writes a whole arranged piece from a style and a seed with no further composing calls, and compose_batch renders several seeds and ranks them by measured checks so a listener only needs to hear the best few. Both are plain code: use them for drafts and bulk work, then edit the winner.');
   const voice = z.object({ voice: z.enum(['pluck', 'bass', 'pad', 'kick', 'clap', 'hat', 'sample', 'preset']), preset: schemas.presetFile.optional(), factorySample: schemas.factorySample.optional(),
     sample: schemas.workspaceWav.optional(), volume: schemas.volume.optional(), pan: z.number().int().min(-100).max(100).optional() });
   const recipe = {
-    style: z.enum(styleNames).default('adventure').describe(styleNames.map(name => `${name}: ${styles[name].about}`).join(' ')),
+    persona: z.string().min(1).optional().describe('Persona id from list_personas.'),
+    style: z.enum(styleNames).optional().describe(styleNames.map(name => `${name}: ${styles[name].about}`).join(' ')),
     key: z.string().min(1).max(30).optional().describe('Such as "D minor". Default: chosen from the style by the seed.'),
     bpm: z.number().min(45).max(240).optional(), seconds: z.number().min(10).max(600).optional(), bars: z.number().int().min(8).max(200).optional(),
     voices: z.record(z.enum(['lead', 'harmony', 'pad', 'bass', 'kick', 'snare', 'hat', 'crash', 'siren']), voice).default({}).describe('Replace the sound of any part, for example {"lead": {"voice": "preset", "preset": "TripleOscillator/Square.xpf", "volume": 14}}.'),
   };
   async function build(options, output) {
-    const piece = composePiece(options);
+    const piece = composePiece(options, { personasDirectory });
     const items = piece.tracks.map(item => schemas.track.parse(item));
     for (const item of items) await project.checkTrack(item);
     const doc = project.createSong(piece.bpm, items, piece.masterVolume);
@@ -404,7 +449,8 @@ export function register({ tool, z, dsp, root, schemas, project, render, moduleG
     await project.save(doc, output);
     return { piece, doc };
   }
-  const summary = piece => ({ style: piece.style, key: piece.key, bpm: piece.bpm, seed: piece.seed, lengthBars: piece.lengthBars, lengthSeconds: piece.lengthSeconds, form: piece.form, structure: piece.structure, chords: piece.chords.join(' '),
+  const summary = piece => ({ style: piece.style, key: piece.key, bpm: piece.bpm, seed: piece.seed, lengthBars: piece.lengthBars, lengthSeconds: piece.lengthSeconds,
+    ...(piece.persona ? { persona: piece.persona, mix: piece.mix, ...(piece.personaWarnings ? { personaWarnings: piece.personaWarnings } : {}) } : {}), form: piece.form, structure: piece.structure, chords: piece.chords.join(' '),
     sections: piece.sections, phrases: piece.plan.map(p => ({ bar: p.bar, bars: p.bars, role: p.role, climax: p.climax })), tune: piece.tune,
     tracks: piece.tracks.map(t => ({ name: t.name, role: t.role, notes: t.patterns[0].notes.length })) });
 
@@ -417,17 +463,19 @@ export function register({ tool, z, dsp, root, schemas, project, render, moduleG
 
   tool('compose_batch', 'Compose several seeds of the same recipe, render each one, and rank them by measured checks: the arrangement lint, mix warnings from the render, and a tune score (stepwise motion, range, breathing room, rhythmic variety, one clear peak). Returns the ranking with reasons so a listener only needs to hear the top few. The scores catch faults; they cannot tell whether a tune is good.', {
     name: schemas.folderName.describe('Prefix for the files: <name>-s<seed>.mmp and .wav.'), count: z.number().int().min(2).max(24).default(6),
-    seedStart: z.number().int().min(1).max(2147483000).default(1), targetLufs: schemas.loudnessTarget, ...recipe,
-  }, async ({ name, count, seedStart, targetLufs, ...options }) => {
+    seedStart: z.number().int().min(1).max(2147483000).default(1), targetLufs: schemas.loudnessTarget, ceilingDb: schemas.ceilingTarget, ...recipe,
+  }, async ({ name, count, seedStart, targetLufs, ceilingDb, ...options }) => {
     const results = [];
     for (let seed = seedStart; seed < seedStart + count; seed++) {
       const file = `${name}-s${seed}`;
       const { piece, doc } = await build({ ...options, seed }, file + '.mmp');
       const lint = lintModel(modelFromDoc(await project.load(file + '.mmp'), project), { key: piece.key });
-      const { wav } = await render.renderMix(doc, { tail: 'keep', targetLufs: targetLufs ?? -16, ceilingDb: -1.5 });
+      const loudness = targetLufs ?? piece.mix?.targetLufs ?? -16;
+      const ceiling = ceilingDb ?? piece.mix?.ceilingDb ?? -1.5;
+      const { wav } = await render.renderMix(doc, { tail: 'keep', targetLufs: loudness, ceilingDb: ceiling });
       await render.writeAudio(path.join(root, file + '.wav'), wav);
       const report = dsp.analyze(dsp.decodeWav(await readFile(path.join(root, file + '.wav'))));
-      const warnings = dsp.advise(report, { targetLufs: targetLufs ?? -16 });
+      const warnings = dsp.advise(report, { targetLufs: loudness });
       const quality = qualityScore(lint, { audioWarnings: warnings, silent: report.integratedLufs === null });
       results.push({ seed, project: file + '.mmp', audio: file + '.wav', key: piece.key, form: piece.form, score: Math.max(0, Math.round(quality.score * 0.5 + piece.tune.score * 0.5) - 6 * piece.structure.warnings.length),
         structureWarnings: piece.structure.warnings,
@@ -435,6 +483,6 @@ export function register({ tool, z, dsp, root, schemas, project, render, moduleG
         findings: lint.findings.slice(0, 4).map(f => f.message ?? f), mixWarnings: warnings, tuneParts: piece.tune.parts });
     }
     results.sort((a, b) => b.score - a.score);
-    return { recipe: { ...options, count, seedStart }, ranking: results.map((r, i) => ({ rank: i + 1, ...r })), next: `Listen to ${results[0].audio} first. Build an audition page with build_audition_page to collect notes, then edit the winner.` };
+    return { recipe: { ...(!options.persona && !options.style ? { style: 'adventure' } : {}), ...options, count, seedStart }, ranking: results.map((r, i) => ({ rank: i + 1, ...r })), next: `Listen to ${results[0].audio} first. Build an audition page with build_audition_page to collect notes, then edit the winner.` };
   });
 }

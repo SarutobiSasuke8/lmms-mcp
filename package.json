@@ -38,6 +38,7 @@
     "music.mjs",
     "effects.mjs",
     "tools/",
+    "personas/*.json",
     "!tools/*.test.mjs",
     "sound-catalogue.json",
     "skills/",

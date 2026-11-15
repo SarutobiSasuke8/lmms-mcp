@@ -4,6 +4,12 @@
 
 Write game music with an AI agent and get engine-ready files back. The agent composes with chords, drum grids and melody lines, chooses from the whole stock LMMS sound library, mixes with real effects, checks its own work by measurement, and exports seamless loops, intros, adaptive layers and stingers with a manifest. The MIT-licensed server works with saved `.mmp` and `.mmpz` files and calls the installed LMMS renderer without opening the editor.
 
+## Composer and DJ personas
+
+Use `list_personas` to filter repository persona data by kind, tags, tempo range or search text. `describe_persona` returns the full brief and references. Pass the ID as `persona` to `compose_piece` or `compose_batch`, or use `lmms-compose --persona <id>` once the data file is installed.
+
+Persona files live in `personas/` and follow `personas/persona.schema.json`. Explicit tempo, key, style and voice arguments override the corresponding defaults. The current composer uses native sound fallbacks, 4/4, and its existing form. It applies the persona’s phrase length, compatible drum/bass patterns, swing, harmony, and the loudness and peak settings supported by the stock renderer. Other groove, arrangement, instrument and mix references are available through `describe_persona` for the corresponding engines to consume. Persona data ships separately.
+
 ## Windows setup
 
 Install Node.js 20 or newer. From a checkout run `./setup-windows.ps1`. It installs the Node dependencies and uses WinGet to install stock LMMS 1.2.2 if needed. For manual setup, run `npm ci` and install [LMMS](https://lmms.io/download). The package contains our server and demo, and setup obtains LMMS from its official distribution.
