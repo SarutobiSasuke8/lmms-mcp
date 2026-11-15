@@ -4,8 +4,13 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+## 0.9.0 - 2026-11-15
+
+No breaking changes. Every 0.8.1 tool keeps its name and its required arguments.
+
 ### Added
 
+- `live_set_parameters`: set exposed native controls in an open LMMS project by model ID (live bridge, Windows).
 - `build_library_page` and `build_library_previews`: one self-contained HTML page that lists every factory preset, stock sample, workspace sound and library phrase with filters and audio previews, plus `library-server.mjs` to serve it so the browser can play files from disk.
 - `write_solo`: a solo line for one instrument over chords, split into short and long notes so a staccato and a sustained sound can play the same part.
 - `list_dj_effects`, `dj_effects` and `rearrange_audio`: DJ effects (filter sweep, phaser, flanger, beat repeat, gate, tape stop, spinback, echo out, scratch, reverse and more) applied to a rendered WAV at bar positions, and DJ-style re-ordering of a render by bar ranges.
@@ -13,6 +18,10 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - `compose_piece` and `compose_batch`: whole arranged pieces from a style and a seed (chords, melody, harmony, bass, drums, intro and ending), rendered and ranked by measured checks. Five starter styles: chiptune, adventure, battle, ballad, swing.
 - `lmms-compose`, a command that composes, renders and ranks pieces with no AI agent.
 - Phrase library: `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase` and `rate_phrase`. Ships 68 phrases (progressions, piano montunos, stabs and arpeggios, bass lines, hooks, trumpet section figures, and conga, clave, cowbell, whistle and house kit grooves) that fit any key, with listener ratings and a record of uses kept in `.lmms-phrases.json`.
+
+### Compatibility
+
+- Same as 0.8.1: stock LMMS 1.2.2 and Node.js 22 on Windows x64, with Linux rendering checked in CI. The VST3 and sampler route is tested on Windows x64 only.
 
 ## 0.8.1 - 2026-11-14
 
