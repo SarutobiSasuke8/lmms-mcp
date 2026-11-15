@@ -1,0 +1,8 @@
+{
+  "id": "lofi-boom-bap",
+  "bpm": { "min": 80, "max": 95, "default": 88 },
+  "description": "Dusty swung drums, vinyl or tape colour, chopped original or CC0 phrases, warm keys, tight boom-bap pocket.",
+  "arrangement": "ukg",
+  "groove": "mpc-swing-70",
+  "notes": "Swung dusty pocket rather than a 4/4 house kick."
+}

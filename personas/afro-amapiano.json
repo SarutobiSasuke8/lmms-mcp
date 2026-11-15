@@ -1,0 +1,9 @@
+{
+  "id": "afro-amapiano",
+  "bpm": { "min": 110, "max": 124, "default": 112 },
+  "description": "Log drum with glide, 3-3-2 and shakers, warm piano chords, wide pads, polyrhythmic percussion.",
+  "subfeel": ["amapiano", "afro-house"],
+  "arrangement": "house",
+  "groove": "amapiano-332",
+  "notes": "Log drum or polyrhythmic perc. Not generic deep house."
+}

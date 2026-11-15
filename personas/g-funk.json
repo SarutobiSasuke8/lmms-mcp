@@ -1,0 +1,8 @@
+{
+  "id": "g-funk",
+  "bpm": { "min": 90, "max": 102, "default": 96 },
+  "description": "Portamento squelch lead, deep rounded bass, laid-back drums, sparse keys, lazy swing.",
+  "arrangement": "ukg",
+  "groove": "mpc-swing-60",
+  "notes": "Mid-tempo, led by a sliding squelch, not trap hats."
+}
