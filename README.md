@@ -29,7 +29,7 @@ Stem, layer and full-song renders can take a minute or more. Give your MCP clien
 
 ## Drum kits
 
-Stock LMMS drum samples are grouped into ready kits. Call `list_drum_kits` to see which pieces are present on this machine, then `create_drum_kit` to start a project with separate kick / snare / hat / clap tracks (empty patterns, role set to drums). You can also pass the returned `factorySample` paths into `create_project` yourself.
+Stock LMMS drum samples are grouped into ready kits, including dance-oriented ones (house, techno, trance, breaks). Call `list_drum_kits` to see which pieces are present on this machine, then `create_drum_kit` to start a project with separate tracks (kick, snare, hat, openhat, clap) ready for patterns. You can also pass the returned `factorySample` paths into `create_project` yourself.
 
 ## Tools
 

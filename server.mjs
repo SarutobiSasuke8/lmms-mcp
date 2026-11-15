@@ -117,6 +117,11 @@ const kits = {
   tight: { kick: 'kick01', snare: 'snare02', hat: 'hihat_closed02', clap: 'clap02' },
   electronic: { kick: 'kick_electronic01', snare: 'snare_electronic01', hat: 'hihat_closed01', clap: 'clap01' },
   acoustic: { kick: 'kick_acoustic01', snare: 'snare_acoustic01', hat: 'hihat_open01', clap: 'clap01' },
+  // Dance-oriented kits using common LMMS factory samples
+  house: { kick: 'kick01', snare: 'snare01', hat: 'hihat_closed01', openhat: 'hihat_open01', clap: 'clap01' },
+  techno: { kick: 'kick_hard01', snare: 'snare_harsh01', hat: 'hihat_closed03', openhat: 'hihat_open01', clap: 'clap02' },
+  trance: { kick: 'kick02', snare: 'snare02', hat: 'hihat_closed02', openhat: 'hihat_open01', clap: 'clap01' },
+  breaks: { kick: 'kick_soft01', snare: 'snare01', hat: 'hihat_closed01', openhat: 'hihat_open01', clap: 'clap01' },
 };
 const kit = kits.soft; // default for the existing kick/clap/hat voices
 
@@ -980,6 +985,8 @@ tool('create_drum_kit', 'Create a new LMMS project containing a ready-to-use dru
 }, async ({ output, kit: kitName, bpm, lengthBars, masterVolume }) => {
   const chosen = kits[kitName];
   const tracks = [];
+  const volumes = { kick: 92, snare: 78, hat: 62, openhat: 58, clap: 70 };
+  const pans = { hat: 22, openhat: -18, clap: 8 };
   for (const [piece, file] of Object.entries(chosen)) {
     const full = path.join(samplesDirectory, 'drums', file + '.ogg');
     if (!existsSync(full)) continue;
@@ -988,8 +995,8 @@ tool('create_drum_kit', 'Create a new LMMS project containing a ready-to-use dru
       voice: 'sample',
       factorySample: `drums/${file}.ogg`,
       role: 'drums',
-      volume: piece === 'kick' ? 90 : piece === 'snare' ? 80 : 70,
-      pan: piece === 'hat' ? 20 : 0,
+      volume: volumes[piece] ?? 70,
+      pan: pans[piece] ?? 0,
       patterns: [{ name: piece, bar: 0, bars: lengthBars, steps: { grid: '-'.repeat(16) } }],
     });
   }
