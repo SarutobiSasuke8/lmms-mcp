@@ -86,6 +86,38 @@ lovel=64 hivel=127
         self.assertEqual(count, 2)
         self.assertEqual(body.count('seqMode="round_robin" seqLength="2"'), 2)
 
+    def test_inline_includes_redefine_macros(self):
+        for name in ("C4v1.wav", "C4v2.wav"):
+            write(os.path.join(self.dir, "Samples", name))
+        write(os.path.join(self.dir, "Data", "v1.txt"), "#define $VEL v1\n")
+        write(os.path.join(self.dir, "Data", "v2.txt"), "#define $VEL v2\n")
+        write(os.path.join(self.dir, "Data", "region.txt"), "<region> key=60 sample=C4$VEL.wav\n")
+        write(os.path.join(self.dir, "layers.sfz"), """
+<control> default_path=Samples/
+<group> #include "Data/v1.txt" lovel=1 hivel=63 #include "Data/region.txt"
+<group> #include "Data/v2.txt" lovel=64 hivel=127 #include "Data/region.txt"
+""")
+        body, count, skipped, missing = conv.convert(os.path.join(self.dir, "layers.sfz"), self.dir, False, False, "")
+        self.assertEqual((count, skipped, missing), (2, 0, []))
+        self.assertIn('path="Samples/C4v1.wav" rootNote="60" loNote="60" hiNote="60" loVel="1" hiVel="63"', body)
+        self.assertIn('path="Samples/C4v2.wav" rootNote="60" loNote="60" hiNote="60" loVel="64" hiVel="127"', body)
+
+    def test_default_keyswitch_and_unplayable_regions(self):
+        write(os.path.join(self.dir, "ks.sfz"), """
+<control> default_path=Samples/
+<global> sw_lokey=c0 sw_hikey=c#0 sw_default=c0
+<master> sw_last=c0
+<region> sample=a.wav key=c4
+<master> sw_last=c#0
+<region> sample=b.wav key=c4
+<global>
+<region> sample=a.wav lokey=-1 hikey=-1
+<region> sample=b.wav key=d4 on_locc64=64 on_hicc64=127
+""")
+        body, count, skipped, _ = conv.convert(os.path.join(self.dir, "ks.sfz"), self.dir, False, False, "")
+        self.assertEqual((count, skipped), (1, 3))
+        self.assertIn('path="Samples/a.wav"', body)
+
     def test_within_blocks_escapes(self):
         outside = tempfile.mkdtemp()
         try:

@@ -14,6 +14,10 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - `lmms-compose`, a command that composes, renders and ranks pieces with no AI agent.
 - Phrase library: `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase` and `rate_phrase`. Ships 68 phrases (progressions, piano montunos, stabs and arpeggios, bass lines, hooks, trumpet section figures, and conga, clave, cowbell, whistle and house kit grooves) that fit any key, with listener ratings and a record of uses kept in `.lmms-phrases.json`.
 
+### Fixed
+- `convert_sfz` now follows `#include` written in the middle of a line, keeps the default keyswitch articulation, and skips controller-triggered and unplayable regions. The Salamander grand piano converts with all 16 velocity layers instead of one sample.
+- Decent Sampler renders wait until the samples have loaded, so the start of a render is no longer silent with large libraries.
+
 ## 0.8.1 - 2026-11-14
 
 No tool changes.
