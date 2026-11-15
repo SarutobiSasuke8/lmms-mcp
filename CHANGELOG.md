@@ -15,6 +15,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Changed
 
 - `render_vst3_stems` renders up to 600 seconds instead of 120.
+- `compose_piece` now plans a form to fit the length: theme, contrast, a solo that opens by quoting the theme, a varied return and an ending, with the accompaniment, bass and drums changing from section to section. Its result gains `form` and `structure`, and each section has a `kind`. `compose_batch` ranks with a structure check. New accompaniment style `held`.
 
 ## 0.9.0 - 2026-11-15
 
