@@ -30,6 +30,7 @@
     "fathom.mjs",
     "vst3-render.py",
     "compose-cli.mjs",
+    "nightly.mjs",
     "library-server.mjs",
     "catalogue.mjs",
     "composers.mjs",
