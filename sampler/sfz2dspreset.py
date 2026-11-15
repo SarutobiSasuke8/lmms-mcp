@@ -230,7 +230,7 @@ def convert(sfz, root, absolute, keep_releases, only):
              "sustain": float(r.get("ampeg_sustain", 100)) / 100, "release": max(float(r.get("ampeg_release", 0.05)), 0.01),
              "ampVelTrack": max(0.0, min(1.0, float(r.get("amp_veltrack", 100)) / 100)),
              "trigger": "release" if r.get("trigger") in ("release", "release_key") else "attack"}
-        # Keyswitch: keep sw_last so Decent Sampler can switch the group per note
+        # Keyswitch metadata (documentation only; actual switching is via <midi> block below)
         if "sw_last" in r:
             try:
                 g["swLast"] = key(r["sw_last"])
@@ -255,17 +255,44 @@ def convert(sfz, root, absolute, keep_releases, only):
         if g["decay"] > 30:
             g["decay"] = 30.0
         groups.setdefault(tuple(sorted(g.items())), []).append(attrs)
+    # Build Decent Sampler <midi> keyswitch bindings (ENABLED toggle by groupIndex)
+    keyswitches = {}  # sw_note -> list of (groupIndex, enabled)
+    group_list = list(groups.items())
+    default_sw = None
+    for idx, (gk, samples) in enumerate(group_list):
+        gdict = dict(gk)
+        sw = gdict.get("swLast")
+        if sw is not None:
+            keyswitches.setdefault(sw, []).append(idx)
+            if default_sw is None:
+                default_sw = sw
+    midi_xml = []
+    if keyswitches:
+        midi_xml.append("  <midi>")
+        for sw, group_idxs in sorted(keyswitches.items()):
+            midi_xml.append(f'    <note note="{sw}" enabled="true" eventType="note_on" swallowNotes="true">')
+            for idx in range(len(group_list)):
+                on = "true" if idx in group_idxs else "false"
+                midi_xml.append(f'      <binding type="general" level="group" groupIndex="{idx}" parameter="ENABLED" translation="fixed_value" translationValue="{on}"/>')
+            midi_xml.append("    </note>")
+        midi_xml.append("  </midi>")
     xml = []
     count = 0
-    for gk, samples in groups.items():
+    default_idx = 0
+    for idx, (gk, samples) in enumerate(groups.items()):
+        gdict = dict(gk)
+        is_default = (gdict.get("swLast") == default_sw) if default_sw is not None else (idx == 0)
+        enabled = "true" if is_default else "false"
         gattrs = " ".join(f"{k}={quoteattr(str(round(v, 4) if isinstance(v, float) else v))}"
-                          for k, v in gk if not (k == "trigger" and v == "attack"))
-        xml.append(f"    <group {gattrs}>")
+                          for k, v in gk if not (k == "trigger" and v == "attack") and k not in ("swLast", "swLoKey", "swHiKey"))
+        xml.append(f'    <group {gattrs} enabled="{enabled}">')
         for a in samples:
             xml.append("      <sample " + " ".join(f"{k}={quoteattr(str(v))}" for k, v in a.items()) + "/>")
             count += 1
         xml.append("    </group>")
-    return "\n".join(xml), count, skipped, missing
+    body = "\n".join(xml)
+    midi_block = "\n".join(midi_xml) if midi_xml else ""
+    return body, count, skipped, missing, midi_block
 
 
 def main():
@@ -281,8 +308,9 @@ def main():
     if not inside(sfz):
         raise SystemExit("The SFZ file is outside the library folder")
     root = os.path.abspath(a.root) if a.root else os.path.dirname(sfz)
-    body, count, skipped, missing = convert(sfz, root, a.abs, a.keep_releases, a.only)
-    doc = f'<?xml version="1.0" encoding="UTF-8"?>\n<DecentSampler minVersion="1.0.0">\n  <groups>\n{body}\n  </groups>\n</DecentSampler>\n'
+    body, count, skipped, missing, midi_block = convert(sfz, root, a.abs, a.keep_releases, a.only)
+    midi_part = f"\n{midi_block}\n" if midi_block else ""
+    doc = f'<?xml version="1.0" encoding="UTF-8"?>\n<DecentSampler minVersion="1.0.0">\n  <groups>\n{body}\n  </groups>{midi_part}</DecentSampler>\n'
     with open(a.out, "w", encoding="utf-8") as handle:
         handle.write(doc)
     print(f"{count} samples written, {skipped} regions skipped, {len(missing)} missing files" + (f" e.g. {missing[0]}" if missing else ""))

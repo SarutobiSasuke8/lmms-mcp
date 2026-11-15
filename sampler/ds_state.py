@@ -53,7 +53,14 @@ def make_state(template_state, dspreset_text, sample_path, name="preset"):
     inner_xml, inner_tail = unpack(b64_decode(m.group(1).strip()))
     inner = inner_xml.decode("utf-8")
     groups = re.search(r"<groups>.*</groups>", dspreset_text, re.S).group(0)
+    midi = re.search(r"<midi>.*</midi>", dspreset_text, re.S)
     inner = re.sub(r"<groups\s*/>|<groups>.*?</groups>", lambda _: groups, inner, count=1, flags=re.S)
+    if midi:
+        midi_block = midi.group(0)
+        if "<midi>" in inner:
+            inner = re.sub(r"<midi>.*?</midi>", midi_block, inner, count=1, flags=re.S)
+        else:
+            inner = inner.replace("</groups>", "</groups>\n" + midi_block)
     inner = re.sub(r'_samplePath="[^"]*"', f'_samplePath="{sample_path}"', inner)
     inner = re.sub(r'_presetName="[^"]*"', f'_presetName="{name}"', inner)
     new_inner = pack(inner.encode("utf-8"), inner_tail)

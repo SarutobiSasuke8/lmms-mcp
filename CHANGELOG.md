@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Fixed
 
+- SFZ keyswitch articulations now emit a Decent Sampler `<midi>` block that toggles `ENABLED` on groups by `groupIndex` (note_on, swallowNotes). Non-default groups start `enabled="false"`. `make_state` preserves the `<midi>` block. Fixes stacked-all-groups behaviour.
+
 - `export_game_audio` no longer reports `seamless: true` when `analyze_audio` warns of a loop click. The manifest now sets `seamless` from the actual loop-click check and records the issue.
 - Renders no longer carry a DC offset of ~0.027. Mean subtraction is applied in the master path of `export_game_audio` (and available via `dsp.removeDc`).
 - `sounds: "suggested"` no longer picks bass-category presets for lead or counter-melody roles.
