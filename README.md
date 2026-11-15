@@ -40,6 +40,7 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Read | `inspect_project`, `inspect_arrangement`, `read_pattern` |
 | Start fast | `list_blueprints`, `create_from_blueprint`, `develop_motif` ([docs/blueprints.md](docs/blueprints.md)) |
 | Write tunes | `write_melody`, `write_accompaniment` ([docs/melody.md](docs/melody.md)) |
+| Nightly soundtrack runs | Headless recipe batches and dated listening pages ([docs/nightly.md](docs/nightly.md)) |
 | Whole pieces | `compose_piece`, `compose_batch`, and `lmms-compose` on the command line with no agent ([docs/compose.md](docs/compose.md)) |
 | Solo lines | `write_solo` |
 | DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio`, `time_stretch`, `chop_break` ([break editing](docs/break-edits.md)) |
@@ -193,6 +194,10 @@ Save a full Fathom patch object as JSON in the workspace. Supported model IDs ar
 The bridge uses the written pitches, note lengths and velocities. It interpolates cutoff by frequency ratio and updates the worklet every 128 samples. The project copy keeps the muted source piano-roll track for editing and MIDI export and plays the rendered audio from a sample track. Rerun after editing notes, tempo, patch or cutoff, with fresh output filenames. The current bridge renders the dry worklet. Add delay and reverb with `edit_effect`. The audio clip references an absolute WAV path, so relink it when moving the project.
 
 `search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
+
+## SoundFonts
+
+`render_soundfont` renders a workspace MIDI file through a `.sf2` or `.sf3` using FluidSynth. Set `LMMS_FLUIDSYNTH` (or have `fluidsynth` on PATH) and optionally `LMMS_SOUNDFONTS`. See `docs/soundfont.md`.
 
 ## Optional Atelier groovebox tools
 
