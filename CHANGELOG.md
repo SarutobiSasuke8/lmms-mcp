@@ -7,14 +7,6 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Added
 
 - `build_timeline_page`: one HTML page that shows a song as a DAW would, with each stem as a lane under a bar ruler, sections and DJ effects as blocks, synced playback with mute and solo, section looping, and notes pinned to bars that can be copied back. The library page links each track to its timeline.
-- `import_midi`: a standard MIDI file becomes an editable LMMS project, with its time signature and tempo, sustain pedal baked into note lengths, volume changes folded into velocities, merged tracks and `form` to unfold repeats.
-- `shape_performance`: phrase dynamics, melody voicing, metric accents, ritardando at phrase ends and the final bars, a simulated sustain pedal, melody lead and seeded variation. Also a step for `apply_edits`.
-- `master_audio`: trim, fade and master any workspace WAV to a loudness target.
-- `render_vst3_stems` takes an optional `width`, `eq` and `reverb` for each track.
-
-### Changed
-
-- `render_vst3_stems` renders up to 600 seconds instead of 120.
 
 ## 0.9.0 - 2026-11-15
 
@@ -22,6 +14,10 @@ No breaking changes. Every 0.8.1 tool keeps its name and its required arguments.
 
 ### Added
 
+- `import_midi`: a standard MIDI file becomes an editable LMMS project, with its time signature and tempo, sustain pedal baked into note lengths, volume changes folded into velocities, merged tracks and `form` to unfold repeats.
+- `shape_performance`: phrase dynamics, melody voicing, metric accents, ritardando at phrase ends and the final bars, a simulated sustain pedal, melody lead and seeded variation. Also a step for `apply_edits`.
+- `master_audio`: trim, fade and master any workspace WAV to a loudness target.
+- `render_vst3_stems` takes an optional `width`, `eq` and `reverb` for each track.
 - `live_set_parameters`: set exposed native controls in an open LMMS project by model ID (live bridge, Windows).
 - `build_library_page` and `build_library_previews`: one self-contained HTML page that lists every factory preset, stock sample, workspace sound and library phrase with filters and audio previews, plus `library-server.mjs` to serve it so the browser can play files from disk.
 - `write_solo`: a solo line for one instrument over chords, split into short and long notes so a staccato and a sustained sound can play the same part.
@@ -30,6 +26,10 @@ No breaking changes. Every 0.8.1 tool keeps its name and its required arguments.
 - `compose_piece` and `compose_batch`: whole arranged pieces from a style and a seed (chords, melody, harmony, bass, drums, intro and ending), rendered and ranked by measured checks. Five starter styles: chiptune, adventure, battle, ballad, swing.
 - `lmms-compose`, a command that composes, renders and ranks pieces with no AI agent.
 - Phrase library: `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase` and `rate_phrase`. Ships 68 phrases (progressions, piano montunos, stabs and arpeggios, bass lines, hooks, trumpet section figures, and conga, clave, cowbell, whistle and house kit grooves) that fit any key, with listener ratings and a record of uses kept in `.lmms-phrases.json`.
+
+### Changed
+
+- `render_vst3_stems` renders up to 600 seconds instead of 120.
 
 ### Compatibility
 
