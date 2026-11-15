@@ -335,6 +335,41 @@ export function tuneScore(notes, plan = []) {
   return { score: Math.round(parts.reduce((sum, [, points]) => sum + points, 0)), parts: parts.map(([name, points, detail]) => ({ name, points: Number(points.toFixed(1)), detail })) };
 }
 
+
+// ---------- mood variants ----------
+// Generate calm / explore / combat versions that share the motif and chord plan
+// and line up bar-for-bar. Used by the soundtrack recipe for adaptive layers.
+export function moodVariants({ style = 'adventure', key, bars = 32, seed = 1 } = {}) {
+  const base = composePiece({ style, key, bars, seed });
+  const moods = {
+    calm: { velocityScale: 0.75, drumDensity: 0.4, padBoost: 1.2 },
+    explore: { velocityScale: 0.9, drumDensity: 0.7, padBoost: 1.0 },
+    combat: { velocityScale: 1.1, drumDensity: 1.2, padBoost: 0.8 },
+  };
+  const variants = {};
+  for (const [mood, opts] of Object.entries(moods)) {
+    const piece = composePiece({ style, key, bars, seed }); // same seed => same motif/chords
+    // Scale velocities and note density by mood
+    for (const track of piece.tracks ?? []) {
+      if (track.patterns) {
+        for (const pat of track.patterns) {
+          if (pat.notes) {
+            pat.notes = pat.notes.map(n => ({
+              ...n,
+              velocity: Math.max(1, Math.min(127, Math.round((n.velocity ?? 80) * opts.velocityScale))),
+            }));
+            if (track.role === 'drums' && opts.drumDensity < 1) {
+              pat.notes = pat.notes.filter((_, i) => i % Math.ceil(1 / opts.drumDensity) === 0 || Math.random() < opts.drumDensity);
+            }
+          }
+        }
+      }
+    }
+    variants[mood] = { bars: piece.lengthBars ?? bars, key: piece.key, motifShared: true, ...piece };
+  }
+  return { baseBars: bars, variants };
+}
+
 export function register({ tool, z, dsp, root, schemas, project, render, moduleGuidance }) {
   moduleGuidance.push('compose_piece writes a whole arranged piece from a style and a seed with no further composing calls, and compose_batch renders several seeds and ranks them by measured checks so a listener only needs to hear the best few. Both are plain code: use them for drafts and bulk work, then edit the winner.');
   const voice = z.object({ voice: z.enum(['pluck', 'bass', 'pad', 'kick', 'clap', 'hat', 'sample', 'preset']), preset: schemas.presetFile.optional(), factorySample: schemas.factorySample.optional(),

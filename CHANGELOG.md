@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `moodVariants` generates calm, explore and combat versions from the same motif and chord plan that line up bar-for-bar. Intended for adaptive layers in soundtrack recipes.
+
 - `lmms-compose soundtrack recipe.json` supports multi-cue soundtrack recipes. Each cue is composed as a batch; the best by score is kept. Writes a `.soundtrack.json` manifest the game can load. See `examples/soundtrack-recipe.json`.
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.

@@ -177,3 +177,14 @@ test('the structure check flags a piece whose sections do not differ', () => {
   assert.ok(structureCheck(flat).warnings.some(w => /sounds like/.test(w)));
   assert.ok(structureCheck({ ...piece, sections: piece.sections.filter(s => s.kind !== 'solo') }).warnings.some(w => /no solo/.test(w)));
 });
+
+import { moodVariants } from './compose.mjs';
+
+test('moodVariants share motif and bar length', () => {
+  const result = moodVariants({ style: 'adventure', key: 'C major', bars: 16, seed: 42 });
+  const bars = result.variants.calm.lengthBars ?? result.variants.calm.bars;
+  assert.equal(bars, 16);
+  assert.equal(result.variants.explore.lengthBars ?? result.variants.explore.bars, 16);
+  assert.equal(result.variants.combat.lengthBars ?? result.variants.combat.bars, 16);
+  assert.ok(result.variants.calm.motifShared);
+});
