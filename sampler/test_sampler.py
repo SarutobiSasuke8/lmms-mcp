@@ -118,6 +118,51 @@ lovel=64 hivel=127
         self.assertEqual((count, skipped), (1, 3))
         self.assertIn('path="Samples/a.wav"', body)
 
+    def test_salamander_style_library(self):
+        # Inline includes on a group line, per-group defines, a default keyswitch, cc-modulated defaults,
+        # release samples and a pedal-noise region triggered by CC64.
+        write(os.path.join(self.dir, "Data", "vel_1.txt"), "#define $VEL a\n")
+        write(os.path.join(self.dir, "Data", "vel_2.txt"), "#define $VEL b\n")
+        write(os.path.join(self.dir, "Data", "region.txt"), "<region> key=c4 sample=$VEL.wav\n")
+        write(os.path.join(self.dir, "grand.sfz"), """
+#define $NATURAL C0
+#define $RELEASE 72
+<control>
+default_path=Samples/
+set_hdcc$RELEASE=0.5
+set_hdcc99=0.73
+<global>
+amp_veltrack_oncc99=-100
+amp_veltrack_curvecc99=2
+ampeg_release_oncc$RELEASE=2
+sw_lokey=$NATURAL sw_hikey=C#0 sw_default=$NATURAL
+<master>
+sw_last=$NATURAL
+<group> #include "Data/vel_1.txt" lovel=1 hivel=63 #include "Data/region.txt"
+<group> #include "Data/vel_2.txt" lovel=64 hivel=127 #include "Data/region.txt"
+<master>
+sw_last=C#0
+<group> lovel=1 hivel=127
+<region> key=c4 sample=b.wav tune=20
+<global>
+trigger=release
+<group>
+<region> key=c4 sample=rel.wav
+<group> on_locc64=64 on_hicc64=127
+<region> lokey=-1 hikey=-1 sample=a.wav
+""")
+        body, count, skipped, missing = conv.convert(os.path.join(self.dir, "grand.sfz"), self.dir, False, False, "")
+        self.assertEqual((count, skipped, missing), (2, 3, []))  # retuned articulation, release and pedal noise skipped
+        self.assertIn('path="Samples/a.wav" rootNote="60" loNote="60" hiNote="60" loVel="1" hiVel="63"', body)
+        self.assertIn('path="Samples/b.wav" rootNote="60" loNote="60" hiNote="60" loVel="64" hiVel="127"', body)
+        self.assertIn('ampVelTrack="0.73"', body)  # 100 - 100 * (1 - 0.73), inverted curve 2
+        self.assertIn('release="1.05"', body)  # 0.05 + 2 * 0.5
+        self.assertNotIn("trigger=", body)
+        body, count, skipped, _ = conv.convert(os.path.join(self.dir, "grand.sfz"), self.dir, False, True, "")
+        self.assertEqual((count, skipped), (3, 2))
+        self.assertIn('trigger="release"', body)
+        self.assertEqual(body.count('trigger="release"'), 1)
+
     def test_within_blocks_escapes(self):
         outside = tempfile.mkdtemp()
         try:
