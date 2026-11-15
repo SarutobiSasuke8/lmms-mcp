@@ -188,7 +188,7 @@ const alternates = { // how each part changes from the theme, so every section s
   drums: { contrast: { rock: 'halftime', four: 'halftime', chip: 'halftime', halftime: 'rock', ballad: 'ballad', swing: 'swing', none: 'none' } },
 };
 
-export function composePiece({ style: styleName = 'adventure', key, bpm, bars, seconds, seed = 1, voices = {} } = {}) {
+export function composePiece({ style: styleName = 'adventure', key, bpm, bars, seconds, seed = 1, voices = {}, instruments = {} } = {}) {
   const style = styles[styleName];
   if (!style) throw new Error(`Unknown style "${styleName}". Use one of: ${styleNames.join(', ')}`);
   const random = rng(seed + 11), tempo = bpm ?? style.bpm, keyName = key ?? random.pick(style.keys);
@@ -277,6 +277,7 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
     for (const part of Object.keys(drums)) drums[part].push(...shift(beat[part], at));
   });
   const sound = { ...style.voices, ...voices };
+  // instruments: optional real-instrument overrides (sf2, vst3, atelier) recorded for later render passes
   const track = (name, role, slot, notes) => notes?.length ? { name, role, pan: 0, ...sound[slot], patterns: [{ name, bar: 0, bars: total, notes: [...notes].sort((a, b) => a.tick - b.tick) }] } : null;
   const tracks = [track('Lead', 'lead', 'lead', lead), track('Harmony', 'harmony', 'harmony', harmony), track('Pad', 'texture', 'pad', pad), track('Bass', 'bass', 'bass', bass),
     track('Kick', 'drums', 'kick', drums.kick), track('Snare', 'drums', 'snare', drums.snare), track('Hat', 'drums', 'hat', drums.hat), track('Crash', 'drums', 'crash', drums.crash)].filter(Boolean);
@@ -344,6 +345,7 @@ export function register({ tool, z, dsp, root, schemas, project, render, moduleG
     key: z.string().min(1).max(30).optional().describe('Such as "D minor". Default: chosen from the style by the seed.'),
     bpm: z.number().min(45).max(240).optional(), seconds: z.number().min(10).max(600).optional(), bars: z.number().int().min(8).max(200).optional(),
     voices: z.record(z.enum(['lead', 'harmony', 'pad', 'bass', 'kick', 'snare', 'hat', 'crash']), voice).default({}).describe('Replace the sound of any part, for example {"lead": {"voice": "preset", "preset": "TripleOscillator/Square.xpf", "volume": 14}}.'),
+    instruments: z.record(z.string(), z.object({ type: z.enum(['sf2', 'vst3', 'atelier', 'native']), path: z.string().optional(), bank: z.number().optional(), patch: z.number().optional(), engine: z.string().optional() })).default({}).describe('Optional real-instrument overrides for later render passes (sf2player, VST3, Atelier).'),
   };
   async function build(options, output) {
     const piece = composePiece(options);
