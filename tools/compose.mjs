@@ -52,7 +52,7 @@ export function writeProgression({ key: keyInput, bars, seed = 1 } = {}) {
 }
 
 // ---------- bass ----------
-export const bassStyles = ['roots', 'pulse', 'octaves', 'walking', 'syncopated'];
+export const bassStyles = ['roots', 'pulse', 'octaves', 'walking', 'syncopated', 'reggae', 'sub', 'wobble'];
 export function writeBass({ chords, bars, style = 'pulse', seed = 1, low = 28, high = 50, baseVelocity = 92, plan: phrasePlan = [], final = true } = {}) {
   if (!bassStyles.includes(style)) throw new Error(`Unknown style "${style}". Use one of: ${bassStyles.join(', ')}`);
   const plan = chordPlan(chords, bars), random = rng(seed + 211), notes = [];
@@ -68,6 +68,28 @@ export function writeBass({ chords, bars, style = 'pulse', seed = 1, low = 28, h
       last = root;
       if (final && bar === bars - 1) return push(from, span - 6, root, gain - 4);
       if (style === 'roots') return push(from, span - 8, root, gain);
+      if (style === 'sub') { // dub and dubstep: one long low note, sometimes an octave pickup into the next chord
+        push(from, span - 30, root, gain);
+        if (span >= BAR && random.chance(0.4)) push(from + span - 24, 20, root + 12, gain - 10);
+        return;
+      }
+      if (style === 'reggae') { // heavy and melodic: the root, then space, then a figure that answers the drums
+        if (span < BAR) { push(from, 40, root, gain + 2); if (span >= 96) push(from + 48, 40, tone(chord, root, 2), gain - 5); return; }
+        const figure = random.pick([
+          [[0, 64, 0, 3], [72, 20, 2, -6], [96, 40, 0, 0], [144, 20, 1, -6], [168, 20, 'approach', -8]],
+          [[0, 40, 0, 3], [48, 20, 0, -8], [96, 64, 2, -2], [168, 20, 0, -6]],
+          [[0, 88, 0, 3], [96, 20, 1, -5], [120, 20, 2, -5], [144, 40, 0, -2]],
+        ]);
+        for (const [t, len, which, accent] of figure) push(from + t, len, which === 'approach' ? rootOf(next, root) - 2 : which ? tone(chord, root, which) : root, gain + accent + random.spread(2));
+        return;
+      }
+      if (style === 'wobble') { // dubstep: the root retriggered at a rate that changes every half bar
+        for (let half = 0; half * 96 < span; half++) {
+          const rate = random.pick([48, 24, 24, 16, 12]), lift = half % 2 === 1 && random.chance(0.25) ? 12 : 0;
+          for (let t = 0, i = 0; t < 96 && half * 96 + t < span; t += rate, i++) push(from + half * 96 + t, rate - 2, half === 0 && t === 0 ? root : root + lift, gain + (i % 2 === 0 ? 4 : -8) + random.spread(2));
+        }
+        return;
+      }
       if (style === 'pulse' || style === 'octaves') {
         for (let t = 0, i = 0; t < span; t += 24, i++) {
           const up = style === 'octaves' ? i % 2 === 1 : t + 24 >= span && random.chance(0.35);
@@ -97,6 +119,10 @@ const grooves = { // 16 steps per bar: [step, velocity]
   four: { kick: [[0, 100], [4, 94], [8, 98], [12, 94]], snare: [[4, 88], [12, 90]], hat: [[2, 70], [6, 66], [10, 70], [14, 66]] },
   halftime: { kick: [[0, 100], [10, 78]], snare: [[8, 100]], hat: [0, 2, 4, 6, 8, 10, 12, 14].map(s => [s, s % 4 === 0 ? 72 : 52]) },
   ballad: { kick: [[0, 84], [10, 60]], snare: [[8, 74]], hat: [[0, 56], [4, 46], [8, 54], [12, 46]] },
+  onedrop: { kick: [[8, 100]], snare: [[8, 90]], hat: [0, 2, 4, 6, 8, 10, 12, 14].map(s => [s, s % 4 === 2 ? 74 : 50]) }, // reggae: kick and rim together on beat three, nothing on one
+  rockers: { kick: [[0, 94], [8, 100]], snare: [[8, 92]], hat: [0, 2, 4, 6, 8, 10, 12, 14].map(s => [s, s % 4 === 2 ? 74 : 50]) },
+  steppers: { kick: [[0, 98], [4, 92], [8, 100], [12, 92]], snare: [[8, 90]], hat: [0, 2, 4, 6, 8, 10, 12, 14].map(s => [s, s % 4 === 2 ? 72 : 48]) },
+  dubstep: { kick: [[0, 112], [11, 78]], snare: [[8, 112]], hat: [[2, 58], [6, 56], [10, 48], [12, 62], [14, 56]] }, // half-time at 140
   chip: { kick: [[0, 100], [6, 76], [8, 94]], snare: [[4, 94], [12, 96]], hat: Array.from({ length: 16 }, (_, s) => [s, s % 4 === 0 ? 74 : s % 2 === 0 ? 58 : 40]) },
 };
 export const drumStyles = [...Object.keys(grooves), 'swing', 'none'];
@@ -129,7 +155,7 @@ export function writeDrums({ bars, style = 'rock', seed = 1, phraseBars = 4, pla
     for (const [s, v] of groove.hat) if (!(fill && s >= 12)) hit('hat', bar, s * STEP + (s % 2 ? random.spread(1) : 0), v * gain + random.spread(3), 24);
     if (bar < quietBars) continue;
     for (const [s, v] of groove.kick) hit('kick', bar, s * STEP, v * gain + random.spread(2));
-    if (random.chance(0.22) && style !== 'ballad') hit('kick', bar, 14 * STEP, 66 * gain);
+    if (random.chance(0.22) && !['ballad', 'onedrop', 'rockers', 'steppers'].includes(style)) hit('kick', bar, 14 * STEP, 66 * gain); // reggae grooves keep their kick pattern exact
     for (const [s, v] of groove.snare) if (!(fill && s >= 12)) hit('snare', bar, s * STEP, v * gain + random.spread(2));
     if (fill) (style === 'ballad' ? [12, 14] : [12, 13, 14, 15]).forEach((s, i) => hit('snare', bar, s * STEP, (62 + i * 11) * gain));
   }
@@ -157,6 +183,20 @@ export const styles = {
     melody: { style: 'swing', low: 64, high: 86, baseVelocity: 82 }, harmony: { style: 'block', low: 45, high: 62, baseVelocity: 56 }, bass: 'walking', drums: 'swing',
     voices: { lead: { voice: 'pluck', volume: 80 }, harmony: { voice: 'pad', volume: 44, pan: -16 }, bass: { voice: 'bass', volume: 82 },
       kick: acoustic.kick, snare: { voice: 'sample', factorySample: 'drums/snare_muffled01.ogg', volume: 34 }, hat: { voice: 'sample', factorySample: 'drums/ride01.ogg', volume: 20, pan: 20 }, crash: acoustic.crash } },
+  reggae: { about: 'Roots reggae: a horn tune over off-beat guitar, bubbling organ, a heavy melodic bass and a one-drop beat.', bpm: 78, keys: ['A minor', 'D minor', 'G major', 'C major', 'E minor'],
+    melody: { style: 'lyrical', low: 64, high: 86, baseVelocity: 84 }, harmony: { style: 'skank', low: 43, high: 64, baseVelocity: 66 }, pad: { style: 'bubble', low: 43, high: 64, baseVelocity: 50, always: true }, bass: 'reggae', drums: 'onedrop',
+    voices: { lead: { voice: 'preset', preset: 'ZynAddSubFX/Laba170bank/0112-PoorTrumpet.xiz', volume: 56 }, harmony: { voice: 'pluck', volume: 44, pan: -24 }, pad: { voice: 'preset', preset: 'Organic/organ_blues.xpf', volume: 26, pan: 22 },
+      bass: { voice: 'bass', volume: 86 }, kick: acoustic.kick, snare: { voice: 'sample', factorySample: 'drums/sidestick01.ogg', volume: 44 }, hat: acoustic.hat, crash: acoustic.crash } },
+  dub: { about: 'Dub: slow and spacious, steppers drums, sub bass, off-beat chords with fading echoes, a drop-out section and a siren.', bpm: 72, keys: ['A minor', 'D minor', 'E minor', 'G minor'],
+    melody: { style: 'lyrical', low: 64, high: 86, baseVelocity: 76, dynamics: 0.9 }, harmony: { style: 'skank', low: 43, high: 64, baseVelocity: 62, echo: 3 }, pad: { style: 'bubble', low: 43, high: 64, baseVelocity: 44 },
+    bass: 'reggae', drums: 'steppers', siren: true, dropout: ['contrast', 'solo'],
+    voices: { lead: { voice: 'preset', preset: 'ZynAddSubFX/Collection/0057-Soft Flute.xiz', volume: 110 }, harmony: { voice: 'pluck', volume: 46, pan: -24 }, pad: { voice: 'preset', preset: 'Organic/organ_blues.xpf', volume: 22, pan: 22 },
+      bass: { voice: 'preset', preset: 'BitInvader/subbass.xpf', volume: 26 }, kick: acoustic.kick, snare: { voice: 'sample', factorySample: 'drums/sidestick01.ogg', volume: 44 }, hat: acoustic.hat, crash: acoustic.crash,
+      siren: { voice: 'preset', preset: 'TripleOscillator/Square.xpf', volume: 6, pan: -30 } } },
+  dubstep: { about: 'Dubstep at 140: half-time drums, a retriggered wobble bass, held chords and a sharp lead, with a siren into each drop.', bpm: 140, keys: ['E minor', 'F minor', 'D minor', 'G minor'],
+    melody: { style: 'driving', low: 67, high: 89, baseVelocity: 86, ornament: false }, harmony: { style: 'held', low: 48, high: 66, baseVelocity: 54 }, bass: 'wobble', drums: 'dubstep', siren: true,
+    voices: { lead: { voice: 'preset', preset: 'ZynAddSubFX/Laba170bank/0133-chip-HarshSaw.xiz', volume: 80 }, harmony: { voice: 'pad', volume: 40, pan: -14 }, bass: { voice: 'bass', volume: 84 }, ...kit,
+      siren: { voice: 'preset', preset: 'TripleOscillator/Square.xpf', volume: 6, pan: 30 } } },
 };
 export const styleNames = Object.keys(styles);
 
@@ -184,8 +224,8 @@ export function planForm(totalBars) {
 const alternates = { // how each part changes from the theme, so every section sounds like a new place
   harmony: { contrast: { arpeggio: 'broken', flowing: 'arpeggio', broken: 'arpeggio', block: 'block' }, solo: { arpeggio: 'held', flowing: 'broken', broken: 'held', block: 'held' },
     return: { arpeggio: 'flowing', flowing: 'flowing', broken: 'arpeggio', block: 'block' } },
-  bass: { contrast: { roots: 'pulse', pulse: 'roots', octaves: 'pulse', walking: 'walking', syncopated: 'roots' }, solo: { roots: 'pulse', pulse: 'syncopated', octaves: 'octaves', walking: 'walking', syncopated: 'syncopated' } },
-  drums: { contrast: { rock: 'halftime', four: 'halftime', chip: 'halftime', halftime: 'rock', ballad: 'ballad', swing: 'swing', none: 'none' } },
+  bass: { contrast: { wobble: 'sub', roots: 'pulse', pulse: 'roots', octaves: 'pulse', walking: 'walking', syncopated: 'roots' }, solo: { roots: 'pulse', pulse: 'syncopated', octaves: 'octaves', walking: 'walking', syncopated: 'syncopated' } },
+  drums: { contrast: { onedrop: 'rockers', rockers: 'steppers', steppers: 'onedrop', dubstep: 'dubstep', rock: 'halftime', four: 'halftime', chip: 'halftime', halftime: 'rock', ballad: 'ballad', swing: 'swing', none: 'none' } },
 };
 
 export function composePiece({ style: styleName = 'adventure', key, bpm, bars, seconds, seed = 1, voices = {} } = {}) {
@@ -213,12 +253,13 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
   }
   const chords = sections.flatMap(section => section.chords);
   const shift = (notes, by) => notes.map(note => ({ ...note, tick: note.tick + by * BAR }));
-  const lead = [], plan = [], harmony = [], pad = [], bass = [], drums = { kick: [], snare: [], hat: [], crash: [] };
+  const lead = [], plan = [], harmony = [], pad = [], bass = [], siren = [], drums = { kick: [], snare: [], hat: [], crash: [] };
+  const { always: padAlways, ...padSpec } = style.pad === true ? { style: 'block', low: 45, high: 62, baseVelocity: 50 } : style.pad ?? {};
   let theme = null, motif = null, lastMain = 72;
   // A quiet second voice under the long notes: the nearest chord tone a third to a sixth below, struck with the tune.
   const secondVoice = (notes, sectionChords, from = 0) => notes.filter(note => note.tick >= from && note.length >= 36).map(note => {
     const chord = chordPlan([sectionChords[Math.min(sectionChords.length - 1, Math.floor(note.tick / BAR))]], 1)[0][0];
-    for (let m = note.midi - 3; m >= note.midi - 9; m--) if (chord.pcs.includes(mod(m, 12)) && m >= style.melody.low - 7) return { ...note, midi: m, velocity: Math.max(1, note.velocity - 18) };
+    for (let m = note.midi - 3; m >= note.midi - 9; m--) if (chord.pcs.includes(mod(m, 12)) && m >= style.melody.low) return { ...note, midi: m, velocity: Math.max(1, note.velocity - 18) };
     return null;
   }).filter(Boolean);
   const { low, high } = style.melody;
@@ -241,7 +282,7 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
       const quote = theme.notes.filter(note => note.tick < quoteBars * BAR).map(note => ({ ...note, length: Math.min(note.length, quoteBars * BAR - note.tick) }));
       const free = n - quoteBars;
       const spans = section.chords.slice(quoteBars).map((symbol, i) => ({ symbol, tick: i * BAR, ticks: BAR }));
-      const solo = writeSolo({ key: keyName, spans, bars: free, seed: seed + 31, low, high: Math.min(100, high + 2), energy: styleName === 'ballad' ? 0.72 : style.melody.style === 'driving' ? 1 : 0.95, arc: 'rise', climax: true,
+      const solo = writeSolo({ key: keyName, spans, bars: free, seed: seed + 31, low: low + (style.melody.style === 'driving' ? 1 : 0), high: Math.min(100, high + (style.melody.style === 'driving' ? 2 : 1)), energy: styleName === 'ballad' ? 0.72 : style.melody.style === 'driving' ? 1 : 0.95, arc: 'rise', climax: true,
         phraseBars: 2, resolve: true, baseVelocity: style.melody.baseVelocity + 4 });
       const line = solo.notes.map(({ short, ...note }) => note).filter(note => note.tick < free * BAR - 36).map(note => ({ ...note, length: Math.min(note.length, free * BAR - 36 - note.tick) })).filter(note => note.length >= 6);
       // Keep the solo's dynamics in the piece's range: a little above the theme, with its own shape kept.
@@ -269,8 +310,15 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
     const base = style.harmony.style, kindKey = section.kind === 'bridge' ? 'contrast' : section.kind === 'theme again' ? 'theme' : section.kind;
     const harmonyStyle = kindKey === 'ending' ? 'block' : alternates.harmony[kindKey]?.[base] ?? base;
     const quiet = kindKey === 'intro' ? -8 : kindKey === 'solo' ? -6 : kindKey === 'return' ? 4 : 0;
-    harmony.push(...shift(writeAccompaniment({ chords: section.chords, bars: n, seed: seed + index, plan: local, ...style.harmony, style: harmonyStyle, baseVelocity: style.harmony.baseVelocity + quiet, final: !next }).notes, at));
-    if (style.pad && ['contrast', 'return', 'ending'].includes(kindKey)) pad.push(...shift(writeAccompaniment({ chords: section.chords, bars: n, seed: seed + 1, plan: local, style: 'block', low: 45, high: 62, baseVelocity: 50, final: !next }).notes, at));
+    const dropped = style.dropout?.includes(kindKey); // the dub drop-out: the chords fall away to one echoing stab and the bass and drums carry on
+    if (dropped) harmony.push(...shift(writeAccompaniment({ chords: section.chords.slice(0, 1), bars: 1, seed: seed + index, ...style.harmony, echo: 5, final: false }).notes.filter(note => note.tick >= 144), at));
+    else harmony.push(...shift(writeAccompaniment({ chords: section.chords, bars: n, seed: seed + index, plan: local, ...style.harmony, style: harmonyStyle, baseVelocity: style.harmony.baseVelocity + quiet, final: !next }).notes, at));
+    if (style.siren && ['solo', 'return'].includes(kindKey) && at >= 1) { // a siren in the bar before, rising into the new section
+      const top = 84 + mod(parsedKey.tonic - 84, 12);
+      for (let i = 0; i < 8; i++) siren.push({ tick: (at - 1) * BAR + i * 24, length: 22, midi: top - 12 + (i % 2 ? 5 : 0) + (i >= 4 ? 7 : 0), velocity: 58 + i * 6 });
+    }
+    if (style.pad && !dropped && (padAlways ? kindKey !== 'intro' : ['contrast', 'return', 'ending'].includes(kindKey)))
+      pad.push(...shift(writeAccompaniment({ chords: section.chords, bars: n, seed: seed + 1, plan: local, ...padSpec, ...(kindKey === 'ending' ? { style: 'block' } : {}), final: !next }).notes, at));
     if (kindKey !== 'intro') bass.push(...shift(writeBass({ chords: section.chords, bars: n, seed: seed + index, style: alternates.bass[kindKey]?.[style.bass] ?? style.bass, plan: local, final: !next }).notes, at));
     const beat = writeDrums({ bars: n, seed: seed + index, style: alternates.drums[kindKey]?.[style.drums] ?? style.drums, plan: local, quietBars: kindKey === 'intro' ? n : 0, ending: !next,
       build: next?.kind === 'return' || (next?.kind === 'solo' && n >= 8), crashAtStart: !['intro', 'theme', 'ending'].includes(kindKey) }).parts;
@@ -279,7 +327,7 @@ export function composePiece({ style: styleName = 'adventure', key, bpm, bars, s
   const sound = { ...style.voices, ...voices };
   const track = (name, role, slot, notes) => notes?.length ? { name, role, pan: 0, ...sound[slot], patterns: [{ name, bar: 0, bars: total, notes: [...notes].sort((a, b) => a.tick - b.tick) }] } : null;
   const tracks = [track('Lead', 'lead', 'lead', lead), track('Harmony', 'harmony', 'harmony', harmony), track('Pad', 'texture', 'pad', pad), track('Bass', 'bass', 'bass', bass),
-    track('Kick', 'drums', 'kick', drums.kick), track('Snare', 'drums', 'snare', drums.snare), track('Hat', 'drums', 'hat', drums.hat), track('Crash', 'drums', 'crash', drums.crash)].filter(Boolean);
+    track('Kick', 'drums', 'kick', drums.kick), track('Snare', 'drums', 'snare', drums.snare), track('Hat', 'drums', 'hat', drums.hat), track('Crash', 'drums', 'crash', drums.crash), track('Siren', 'fx', 'siren', siren)].filter(Boolean);
   const out = sections.map(({ chords: sectionChords, ...section }) => section);
   const result = { style: styleName, key: parsedKey.name, bpm: tempo, seed, lengthBars: total, lengthSeconds: Number((total * 240 / tempo).toFixed(3)), masterVolume: 80,
     form: out.map(section => section.kind).join(', '), chords, sections: out, plan, motif, tune: tuneScore(theme.notes, theme.plan), tracks };
@@ -306,7 +354,7 @@ export function structureCheck(piece) {
     if (sameChords && alike >= 0.75 && Math.abs(a.density - b.density) < 0.4) warnings.push(`"${b.kind}" at bar ${b.startBar} sounds like the "${a.kind}" before it: same chords, same rhythm in ${Math.round(alike * 100)}% of bars, same density.`);
   }
   if (piece.lengthBars >= 22 && !body.some(section => section.kind === 'solo')) warnings.push('A piece this long has no solo section.');
-  if (piece.lengthBars >= 26 && !body.some(section => section.kind === 'contrast')) warnings.push('A piece this long has no contrasting section.');
+  if (piece.lengthBars >= 27 && !body.some(section => section.kind === 'contrast')) warnings.push('A piece this long has no contrasting section.');
   return { sections: facts.map(({ chords: sectionChords, rhythms, ...section }) => section), warnings };
 }
 
@@ -343,7 +391,7 @@ export function register({ tool, z, dsp, root, schemas, project, render, moduleG
     style: z.enum(styleNames).default('adventure').describe(styleNames.map(name => `${name}: ${styles[name].about}`).join(' ')),
     key: z.string().min(1).max(30).optional().describe('Such as "D minor". Default: chosen from the style by the seed.'),
     bpm: z.number().min(45).max(240).optional(), seconds: z.number().min(10).max(600).optional(), bars: z.number().int().min(8).max(200).optional(),
-    voices: z.record(z.enum(['lead', 'harmony', 'pad', 'bass', 'kick', 'snare', 'hat', 'crash']), voice).default({}).describe('Replace the sound of any part, for example {"lead": {"voice": "preset", "preset": "TripleOscillator/Square.xpf", "volume": 14}}.'),
+    voices: z.record(z.enum(['lead', 'harmony', 'pad', 'bass', 'kick', 'snare', 'hat', 'crash', 'siren']), voice).default({}).describe('Replace the sound of any part, for example {"lead": {"voice": "preset", "preset": "TripleOscillator/Square.xpf", "volume": 14}}.'),
   };
   async function build(options, output) {
     const piece = composePiece(options);
