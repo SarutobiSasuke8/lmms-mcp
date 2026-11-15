@@ -58,10 +58,10 @@ export function classifyWorkspace(relative) {
   return { type: 'workspace', source: 'Workspace: ' + parts[0] };
 }
 // The audition (mixer) page that belongs to a render, if one was built: "song-club.wav" finds "song-audition.html".
-export function auditionFor(relative, pages) {
+export function auditionFor(relative, pages, suffix = '-audition.html') {
   let name = relative.split('/')[0].replace(/\.[^.]+$/, '');
   for (;;) {
-    if (pages.has(name + '-audition.html')) return name + '-audition.html';
+    if (pages.has(name + suffix)) return name + suffix;
     const cut = name.lastIndexOf('-');
     if (cut <= 0) return null;
     name = name.slice(0, cut);
@@ -244,7 +244,8 @@ function draw(){
     var row=el('div','item'+(index===state.sel?' sel':''));row.dataset.index=index;
     var play=el('button','play',it.u?'▶':'–');play.type='button';play.disabled=!it.u;play.title=it.u?'Listen':'No audio for this item yet';play.onclick=function(){select(index,true)};row.appendChild(play);
     var text=el('div');text.appendChild(el('div','name',it.n));text.appendChild(el('div','path',it.t==='phrase'?it.p:(it.s+(it.c?' / '+it.c:''))));if(it.d)text.appendChild(el('div','desc',it.d));
-    if(it.a){var link=el('a','open','Open mixer page (layers, sections, feedback)');link.href=it.a;link.target='_blank';link.rel='noopener';text.appendChild(link)}row.appendChild(text);
+    if(it.a){var link=el('a','open','Open mixer page (layers, sections, feedback)');link.href=it.a;link.target='_blank';link.rel='noopener';text.appendChild(link)}
+    if(it.y){var tl=el('a','open','Open timeline (stems as lanes)');tl.href=it.y;tl.target='_blank';tl.rel='noopener';tl.style.marginRight='12px';text.insertBefore(tl,text.querySelector('a.open'))}row.appendChild(text);
     var meta=el('div','meta');meta.appendChild(el('span','chip role',it.r));(it.g||[]).slice(0,5).forEach(function(g){meta.appendChild(el('span','chip',g))});
     if(it.l)meta.appendChild(el('span','chip',fmt(it.l)));
     if(it.k)meta.appendChild(el('span','chip','rated '+it.k+'/5'));if(it.x)meta.appendChild(el('span','chip','used '+it.x+'×'));row.appendChild(meta);
@@ -318,7 +319,7 @@ export function register({ tool, z, dsp, root, schemas, project, render, sounds,
       // A render saved as both WAV and OGG is one track: keep the WAV.
       const wavs = new Set(files.filter(f => /\.wav$/i.test(f.relative)).map(f => f.relative.replace(/\.wav$/i, '')));
       files = files.filter(f => !(/\.ogg$/i.test(f.relative) && !f.relative.includes('/') && wavs.has(f.relative.replace(/\.ogg$/i, ''))));
-      const pages = new Set((await readdir(root).catch(() => [])).filter(name => name.endsWith('-audition.html')));
+      const pages = new Set((await readdir(root).catch(() => [])).filter(name => name.endsWith('-audition.html') || name.endsWith('-timeline.html')));
       const list = [];
       for (const f of files) {
         const kind = classifyWorkspace(f.relative), [item] = sampleItems([f], { type: kind.type, source: kind.source, url: x => relativeUrl(x.relative) });
@@ -326,7 +327,8 @@ export function register({ tool, z, dsp, root, schemas, project, render, sounds,
         if (info) item.e = Math.round(info.mtimeMs / 1000);
         if (kind.type === 'track') {
           item.r = 'track';
-          const page = auditionFor(f.relative, pages);
+          const page = auditionFor(f.relative, pages), timeline = auditionFor(f.relative, pages, '-timeline.html');
+          if (timeline) item.y = relativeUrl(timeline);
           if (page) item.a = relativeUrl(page);
           // An outline to click on, for WAV renders small enough to read quickly.
           if (/\.wav$/i.test(f.relative) && info && info.size <= 96 * 1024 * 1024) {
