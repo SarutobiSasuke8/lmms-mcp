@@ -22,8 +22,15 @@ import { effectTypes, resolveParams, describeEffects } from './effects.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(process.env.LMMS_WORKSPACE ?? process.cwd());
-const lmms = process.env.LMMS_EXECUTABLE ??
-  (process.platform === 'win32' ? 'C:/Program Files/LMMS/lmms.exe' : 'lmms');
+function defaultLmms() {
+  if (process.platform === 'win32') return 'C:/Program Files/LMMS/lmms.exe';
+  const candidates = process.platform === 'darwin'
+    ? ['/Applications/LMMS.app/Contents/MacOS/lmms', '/usr/local/bin/lmms', 'lmms']
+    : ['/usr/bin/lmms', '/usr/local/bin/lmms', 'lmms'];
+  for (const c of candidates) if (c === 'lmms' || existsSync(c)) return c;
+  return 'lmms';
+}
+const lmms = process.env.LMMS_EXECUTABLE ?? defaultLmms();
 const dataDirectory = path.join(path.dirname(lmms), 'data');
 const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(dataDirectory, 'presets'));
 const samplesDirectory = path.resolve(process.env.LMMS_SAMPLES ?? path.join(dataDirectory, 'samples'));
@@ -409,7 +416,40 @@ tool('get_started', 'Read the LMMS MCP workflow and discover the local setup bef
     deliver: ['export_game_audio', 'render_stems', 'export_midi', 'export_one_shots'],
     external: ['list_external_tools', 'render_vst3_stems'],
   },
-}));
+}))
+tool('health_check', 'Report whether the local LMMS setup is ready to compose and render. Use this first if a render or export fails.', {}, async () => {
+  const checks = {
+    platform: process.platform,
+    node: process.version,
+    workspace: root,
+    workspaceWritable: false,
+    lmmsExecutable: lmms,
+    lmmsFound: existsSync(lmms) || lmms === 'lmms',
+    ffmpeg: ffmpeg,
+    ffmpegFound: false,
+    fathomConfigured: Boolean(process.env.LMMS_FATHOM_WORKLET && existsSync(process.env.LMMS_FATHOM_WORKLET)),
+    liveToolsEnabled: process.platform === 'win32' && /^[a-zA-Z0-9_-]+$/.test(process.env.LMMS_LIVE_PIPE ?? ''),
+    vst3PythonConfigured: Boolean(process.env.LMMS_VST3_PYTHON),
+  };
+  try {
+    await mkdir(root, { recursive: true });
+    const probe = path.join(root, '.health-probe');
+    await writeFile(probe, 'ok');
+    await rm(probe, { force: true });
+    checks.workspaceWritable = true;
+  } catch {}
+  try {
+    await run(ffmpeg, ['-version'], { timeout: 5000 });
+    checks.ffmpegFound = true;
+  } catch {}
+  checks.ready = checks.lmmsFound && checks.workspaceWritable;
+  checks.notes = [];
+  if (!checks.lmmsFound) checks.notes.push('LMMS executable not found. Set LMMS_EXECUTABLE or install LMMS 1.2.2 and ensure it is on PATH.');
+  if (!checks.workspaceWritable) checks.notes.push('Workspace is not writable. Set LMMS_WORKSPACE to an existing writable directory.');
+  if (!checks.ffmpegFound) checks.notes.push('ffmpeg not found; OGG export will fall back to WAV.');
+  return checks;
+});
+;
 tool('list_composer_profiles', 'Find composer studies by name, musical technique or game use.', {
   query: z.string().max(120).default(''),
 }, async ({ query }) => {

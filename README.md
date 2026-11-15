@@ -26,6 +26,28 @@ On connection, the server sends a short workflow brief through MCP initializatio
 
 Stem, layer and full-song renders can take a minute or more. Give your MCP client a tool timeout of at least five minutes.
 
+
+## Support matrix
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| Windows x64 | Tested | Primary target. Setup script installs Node deps and LMMS 1.2.2 via WinGet. |
+| Linux | Partial | CI renders with the LMMS AppImage. Install LMMS and ensure `lmms` is on PATH, or set `LMMS_EXECUTABLE`. |
+| macOS | Untested | Detection looks in `/Applications/LMMS.app` and common paths. Set `LMMS_EXECUTABLE` if needed. |
+
+Call `health_check` after connecting to confirm the local setup before composing.
+
+## Recommended agent workflow
+
+1. Call `get_started` or `health_check` to confirm the workspace and LMMS are ready.
+2. Plan: `list_composer_profiles`, `resolve_chords`, `search_sounds` / `list_samples`.
+3. Compose: `create_composer_sketch` or `create_project`, then `inspect_arrangement`.
+4. Refine: `apply_edits`, `edit_effect`, `automate_track`.
+5. Listen: `render_mix` or `render_stems`, then `analyze_audio`.
+6. Deliver: `export_game_audio` (loops, layers, stingers) or `export_one_shots` / `export_midi`.
+
+If a render fails, re-check `health_check` and the path in `LMMS_EXECUTABLE`.
+
 ## Tools
 
 The saved-project tools work with stock LMMS. Claude's game-audio suite added chord, melody and drum-grid inputs, measured sound search, batch edits, mixer processing, audio analysis and adaptive game exports. Optional components extend the same project workflow with Fathom synthesis, VST3 stems and live controls.
