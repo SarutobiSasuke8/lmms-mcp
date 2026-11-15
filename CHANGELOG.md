@@ -13,6 +13,10 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 - `setup-libraries-windows.ps1` fetches the Salamander Grand Piano (CC BY 3.0, about 720 MB) as the default piano. The Splendid Grand is still available with `-Only splendid`.
 
+### Fixed
+
+- VST3 stem rendering aligns one-frame rounding differences to the requested length and reports malformed or silent output separately.
+
 ## 0.9.1 - 2026-11-15
 
 No tool changes. Every 0.9.0 tool keeps its name and its required arguments.
