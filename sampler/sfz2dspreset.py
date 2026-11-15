@@ -5,9 +5,9 @@ Usage: sfz2dspreset.py <file.sfz> <out.dspreset> [--root DIR] [--abs] [--only TE
 Sample paths are written relative to --root (default: the sfz folder), or absolute with --abs.
 Handles #define, #include, <control>/<global>/<master>/<group>/<region> inheritance, default_path,
 key names, velocity ranges, loops, offsets, tuning, volume, pan, ampeg, round robin (seq_*), and
-keeps only regions whose cc/keyswitch conditions hold at the SFZ's default controller values.
-A keyswitched library keeps its default articulation (sw_default). Skipped: trigger=release, other keyswitched\narticulations, cc-gated and cc-triggered layers, LFOs, filters and effects.
-*_onccN modulation of envelopes, volume, pan, tune, offset and velocity tracking is applied at the default
+keeps regions active at default controller values. Keyswitched articulations (sw_last / sw_lokey)
+are retained as switchable Decent Sampler groups. Legato and vibrato hints are preserved.
+Skipped: cc-gated and cc-triggered layers, filters and effects.
 controller values, with the standard SFZ curves 0 to 6. With --keep-releases, release samples become Decent
 Sampler release groups.
 """
@@ -129,12 +129,8 @@ def active(r, cc, keep_releases):
         return False
     if "sw_previous" in r or "sw_up" in r or "sw_down" in r:
         return False
-    if "sw_last" in r:  # keep the articulation that is selected when nothing has been switched
-        try:
-            if "sw_default" not in r or key(r["sw_last"]) != key(r["sw_default"]):
-                return False
-        except ValueError:
-            return False
+    # Keyswitched regions are kept; they become switchable Decent Sampler groups.
+    # (Previously only the sw_default articulation was retained.)
     if any(re.fullmatch(r"on_(lo|hi)(hd)?cc\d+", k) for k in r):  # played by a controller, such as pedal noise
         return False
     try:
@@ -234,6 +230,28 @@ def convert(sfz, root, absolute, keep_releases, only):
              "sustain": float(r.get("ampeg_sustain", 100)) / 100, "release": max(float(r.get("ampeg_release", 0.05)), 0.01),
              "ampVelTrack": max(0.0, min(1.0, float(r.get("amp_veltrack", 100)) / 100)),
              "trigger": "release" if r.get("trigger") in ("release", "release_key") else "attack"}
+        # Keyswitch: keep sw_last so Decent Sampler can switch the group per note
+        if "sw_last" in r:
+            try:
+                g["swLast"] = key(r["sw_last"])
+            except ValueError:
+                pass
+        if "sw_lokey" in r:
+            try:
+                g["swLoKey"] = key(r["sw_lokey"])
+            except ValueError:
+                pass
+        if "sw_hikey" in r:
+            try:
+                g["swHiKey"] = key(r["sw_hikey"])
+            except ValueError:
+                pass
+        # Legato
+        if r.get("legato") in ("1", "on", "true") or r.get("trigger") == "legato":
+            g["legato"] = "true"
+        # Simple vibrato hint via CC1 if defined
+        if any(k.startswith("pitchlfo_") or "vib" in k.lower() for k in r):
+            g["vibrato"] = "cc1"
         if g["decay"] > 30:
             g["decay"] = 30.0
         groups.setdefault(tuple(sorted(g.items())), []).append(attrs)

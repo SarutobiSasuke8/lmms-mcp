@@ -61,8 +61,8 @@ lovel=64 hivel=127
 
     def test_convert(self):
         body, count, skipped, missing = conv.convert(os.path.join(self.dir, "inst.sfz"), self.dir, False, False, "")
-        self.assertEqual(count, 2)
-        self.assertEqual(skipped, 3)  # release trigger, cc gate, keyswitch
+        self.assertEqual(count, 3)
+        self.assertEqual(skipped, 2)  # release trigger, cc gate (keyswitch now kept)
         self.assertEqual(missing, ["Samples/missing.wav"])
         self.assertIn('path="Samples/a.wav"', body)
         self.assertIn('rootNote="60" loNote="60" hiNote="60" loVel="1" hiVel="63"', body)
@@ -75,6 +75,24 @@ lovel=64 hivel=127
         body, *_ = conv.convert(os.path.join(self.dir, "inst.sfz"), self.dir, True, False, "")
         self.assertIsNotNone(re.search(r'path="[^"]*/Samples/a\.wav"', body))
         self.assertTrue(os.path.isabs(re.search(r'path="([^"]+)"', body).group(1)))
+
+    
+    def test_keyswitch_groups_kept(self):
+        """Keyswitched articulations become switchable groups with swLast."""
+        write(os.path.join(self.dir, "Samples", "sust.wav"))
+        write(os.path.join(self.dir, "Samples", "stac.wav"))
+        write(os.path.join(self.dir, "ks.sfz"), """
+<control> default_path=Samples/
+<group> sw_last=c1
+<region> sample=sust.wav key=c4
+<group> sw_last=d1
+<region> sample=stac.wav key=c4
+""")
+        body, count, skipped, missing = conv.convert(os.path.join(self.dir, "ks.sfz"), self.dir, False, False, "")
+        self.assertEqual(count, 2)
+        self.assertIn('swLast="24"', body)  # c1 = 24
+        self.assertIn('swLast="26"', body)  # d1 = 26
+        self.assertEqual(skipped, 0)
 
     def test_round_robin(self):
         write(os.path.join(self.dir, "rr.sfz"), """
@@ -115,7 +133,7 @@ lovel=64 hivel=127
 <region> sample=b.wav key=d4 on_locc64=64 on_hicc64=127
 """)
         body, count, skipped, _ = conv.convert(os.path.join(self.dir, "ks.sfz"), self.dir, False, False, "")
-        self.assertEqual((count, skipped), (1, 3))
+        self.assertEqual((count, skipped), (2, 2))  # keyswitch kept
         self.assertIn('path="Samples/a.wav"', body)
 
     def test_salamander_style_library(self):
@@ -152,14 +170,14 @@ trigger=release
 <region> lokey=-1 hikey=-1 sample=a.wav
 """)
         body, count, skipped, missing = conv.convert(os.path.join(self.dir, "grand.sfz"), self.dir, False, False, "")
-        self.assertEqual((count, skipped, missing), (2, 3, []))  # retuned articulation, release and pedal noise skipped
+        self.assertEqual((count, skipped, missing), (3, 2, []))  # keyswitch articulations kept as groups; release and pedal noise skipped
         self.assertIn('path="Samples/a.wav" rootNote="60" loNote="60" hiNote="60" loVel="1" hiVel="63"', body)
         self.assertIn('path="Samples/b.wav" rootNote="60" loNote="60" hiNote="60" loVel="64" hiVel="127"', body)
         self.assertIn('ampVelTrack="0.73"', body)  # 100 - 100 * (1 - 0.73), inverted curve 2
         self.assertIn('release="1.05"', body)  # 0.05 + 2 * 0.5
         self.assertNotIn("trigger=", body)
         body, count, skipped, _ = conv.convert(os.path.join(self.dir, "grand.sfz"), self.dir, False, True, "")
-        self.assertEqual((count, skipped), (3, 2))
+        self.assertEqual((count, skipped), (4, 1))  # keyswitches + release kept
         self.assertIn('trigger="release"', body)
         self.assertEqual(body.count('trigger="release"'), 1)
 

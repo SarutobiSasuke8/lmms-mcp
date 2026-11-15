@@ -13,6 +13,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `convert_sfz` now keeps keyswitched articulations (`sw_last` / `sw_lokey` ranges) as switchable Decent Sampler groups instead of discarding non-default ones. Legato and vibrato (CC1/LFO) hints are preserved where present. `render_vst3_stems` already passes keyswitch notes and CCs from the MIDI.
+
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `convert_sfz` applies controller modulation at the default values (`*_onccN` for envelopes, volume, pan, tuning, offset and velocity tracking) with the standard SFZ curves, so the Salamander Grand gets its intended 73% velocity tracking and 1 second release. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends.
