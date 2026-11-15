@@ -56,7 +56,7 @@ async function runChecks(list, doc, project, strict) {
   return { arrangement };
 }
 const strictChecks = z.boolean().default(false).describe('Stop with an error, writing nothing, when an arrangement check reports an error.');
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.9.0' }, { instructions });
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.9.1' }, { instructions });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
@@ -313,7 +313,7 @@ tool('list_external_tools', 'Discover optional renderer dependencies, VST3 instr
     ],
     setup: 'On Windows x64 with Python 3.12, run setup-vst3-windows.ps1 from the package. See the README for manual setup.' };
 });
-tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments, up to 10 minutes, with an optional reverb per track. Return aligned stereo WAVs, a mix and a reproducible assignment manifest. Leave a few seconds after the last note for the release and reverb tail.', {
+tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments, up to 10 minutes, with an optional EQ, width, reverb and acoustic space (room, hall, church or cathedral) per track. Return aligned stereo WAVs, a mix and a reproducible assignment manifest. Leave a few seconds after the last note for the release and reverb tail.', {
   midi: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
   outputDirectory: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i),
   durationSeconds: z.number().min(0.1).max(600),
@@ -331,6 +331,13 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
       type: z.enum(["highpass", "lowshelf", "highshelf", "peak"]), hz: z.number().min(20).max(20000),
       db: z.number().min(-18).max(18).default(0), q: z.number().min(0.1).max(10).default(0.7),
     })).max(6).default([]).describe("EQ after the instrument, before the reverb. For example a highshelf at 3500 Hz +3 dB to brighten a soft piano."),
+    space: z.object({
+      type: z.enum(["room", "hall", "church", "cathedral"]).describe("room 0.9 s, hall 2.4 s, church 4.2 s, cathedral 7 s of decay."),
+      wetDb: z.number().min(-40).max(0).default(-10).describe("Loudness of the space against the dry sound, measured, so it means the same in every space. -14 is subtle, -10 is spacious, -6 is distant."),
+      width: z.number().min(0).max(1).default(0.6).describe("Stereo width of the space: 0 is a mono tail, 1 fully wide. Wider tails thin out in mono."),
+      seconds: z.number().min(0.3).max(12).optional().describe("Decay time, to override the preset."),
+      predelayMs: z.number().min(0).max(200).optional(), brightness: z.number().min(0).max(1).optional().describe("How long the highs ring. Stone churches are darker than halls."),
+    }).optional().describe("A convolution reverb from a synthetic impulse response of a real-sized space. Smoother than reverb for long tails; use one or the other. Add the decay time to durationSeconds so the tail is kept."),
     reverb: z.object({
       wet: z.number().min(0).max(1).default(0.22), roomSize: z.number().min(0).max(1).default(0.7),
       damping: z.number().min(0).max(1).default(0.5), width: z.number().min(0).max(1).default(1),

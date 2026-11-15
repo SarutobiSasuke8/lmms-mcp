@@ -71,7 +71,7 @@ Not confirmed by reading: Jx9x's full tool count and effect parameter depth, str
 
 ## Refresh, 15 November 2026: main after the composing, solo, DJ and library work
 
-Source: `main` at `67994ac` (npm 0.8.1 plus the unreleased changes in the changelog). Our column comes from running the code: `npm test` passed 188 of 188 and the server started over stdio and listed **76 tools**. CI runs on Windows and Linux with a separate LMMS render job, so the "no CI yet" line in the v0.7.0 table is out of date. The competitor columns are still reading, not running. We re-checked the three repositories on this date: ZipseLu's last commit is `e57d9fe` (21 August), Jx9x's is `5e6f57b` (23 October) and struktured-labs' is from 18 January. None has moved since the v0.7.0 survey, so those cells stand. A fourth repository, hamilto8/lmms_mcp, is empty.
+Source: `main` at `67994ac` (`package.json` at 0.8.1 plus the unreleased changes in the changelog, before 0.9.0 was cut). Our column comes from running the code: `npm test` passed 188 of 188 and the server started over stdio and listed **76 tools**. CI runs on Windows and Linux with a separate LMMS render job, so the "no CI yet" line in the v0.7.0 table is out of date. The competitor columns are still reading, not running. We re-checked the three repositories on this date: ZipseLu's last commit is `e57d9fe` (21 August), Jx9x's is `5e6f57b` (23 October) and struktured-labs' is from 18 January. None has moved since the v0.7.0 survey, so those cells stand. A fourth repository, hamilto8/lmms_mcp, is empty.
 
 What was added since v0.7.0, and what none of the three others documents:
 
