@@ -1854,6 +1854,18 @@ if (process.platform === 'win32' && livePipe && /^[a-zA-Z0-9_-]+$/.test(livePipe
     }
     return bridgeCall('get_parameters', args);
   });
+  tool('live_set_parameters', 'Set exposed native controls in the open LMMS project by model ID, in native units. Discover the controls with live_parameters first. The bridge validates the batch before applying it and returns the resulting values. Changes are unsaved.', {
+    ...token,
+    values: z.array(z.object({
+      model_id: z.number().int().min(1).max(4294967295),
+      value: z.union([z.number().min(-1e9).max(1e9), z.boolean()]),
+    })).min(1).max(512),
+  }, async args => {
+    if (new Set(args.values.map(edit => edit.model_id)).size !== args.values.length) {
+      throw new Error('Use each model ID only once in a parameter batch');
+    }
+    return bridgeCall('set_parameters', args);
+  });
   tool('live_create_track', 'Create a native song track or an instrument lane in the Beat/Bassline editor.', {
     ...token, type: z.enum(['instrument', 'sample', 'automation', 'bb']), container: z.enum(['song', 'bb']).optional(),
     name: z.string().min(1).max(256).optional(), instrument: z.string().min(1).max(120).optional(),

@@ -28,6 +28,8 @@ Stem, layer and full-song renders can take a minute or more. Give your MCP clien
 
 ## Tools
 
+The saved-project tools work with stock LMMS. Claude's game-audio suite added chord, melody and drum-grid inputs, measured sound search, batch edits, mixer processing, audio analysis and adaptive game exports. Optional components extend the same project workflow with Fathom synthesis, VST3 stems and live controls.
+
 | Area | Tools |
 | --- | --- |
 | Compose | `list_composer_profiles`, `create_composer_sketch`, `create_project`, `add_track`, `add_pattern`, `replace_pattern`, `copy_bars`, `edit_clip`, `edit_sample_clip`, `remove_track`, `set_song_length`, `set_project_tempo`, `resolve_chords` |
@@ -188,6 +190,15 @@ The bridge uses the written pitches, note lengths and velocities. It interpolate
 
 ## External VST3 instruments
 
+### Companion tool coverage
+
+| Tool or workflow | Status |
+| --- | --- |
+| FluidSynth and FluidR3 GM | Tested offline from the same editable MIDI as an LMMS cue. Run FluidSynth separately. |
+| Decent Sampler and Surge XT | Clean Windows setup and combined piano/pad stem render verified. Sample libraries are separate downloads. |
+| Dedicated electric piano, vibraphone and orchestral libraries | FluidR3 provided a baseline. Dedicated libraries, articulation changes and large orchestral sessions remain to be tested. |
+| REAPER, ACE-Step, Stable Audio and Lyria | Evaluation candidates outside the verified MCP workflow. |
+
 The MCP package includes the VST3 adapter. Install the optional host dependencies and instruments locally to enable it. Use `list_external_tools` to see the upstream links, configured plugins and whether the selected Python has the required packages. The tool reports file presence. A render verifies whether a plugin and preset load successfully.
 
 On Windows x64 with Python 3.12 installed, run `./setup-vst3-windows.ps1` from the package or checkout. It downloads pinned portable Decent Sampler and Surge XT plug-ins from their publishers, checks their SHA-256 hashes and creates an isolated host environment. Copy the generated `mcp-env.json` entries into your MCP client's environment settings and restart the client. The default destination is `%LOCALAPPDATA%/lmms-mcp/vst3-v1`. Use `-InstallDirectory` with a new directory for a separate install or to retry a failed setup. The command leaves system plug-in folders alone and sample libraries are obtained separately.
@@ -216,6 +227,10 @@ Search for `victory`, `whole-tone`, `counterpoint`, `jrpg`, `minimalism`, `folkl
 
 The profiles are original studies in musical techniques. `jrpg-battle` references [Nobuo Uematsu](https://www.jp.square-enix.com/music/sem/page/MODULATION/en/) and `additive-pulse` references [Philip Glass’s additive process](https://philipglass.com/recordings/two_pages/). The sketches contain original notes and stock LMMS sounds.
 
+## Game sound effects
+
+Use `list_samples` for installed source sounds and `preview_sound` to audition them. Layer synthesis and recordings in editable tracks using `create_project` and `edit_sample_clip`. Shape the result with `edit_effect`, render variations, then run `export_one_shots` to trim, fade and peak-match PCM WAVs and produce a batch manifest. Keep source URLs, licences and attribution with third-party assets. External library ingestion, licence-aware search, automated attribution and direct game-engine import are roadmap work.
+
 ## Codex and Claude Code skill
 
 Copy [the LMMS game audio skill](skills/lmms-game-audio/SKILL.md) with its directory into `.agents/skills/` for Codex or `.claude/skills/` for Claude Code in your project. Configure the MCP separately using the setup above.
@@ -240,6 +255,8 @@ The optional Windows transport adapter uses a separately built [LMMS Agent Bridg
 With the same bridge enabled, use `live_inspect` to read project state, arrangement and notes. Pass the returned project token to `live_update_track`, `live_update_clip`, `live_replace_notes` or `live_update_effect`. Take track and clip indices from a fresh arrangement read, particularly after adding or removing tracks in LMMS. Changes appear in the open project and can be saved in LMMS.
 
 Use `live_parameters` to discover current control names, values, ranges and session-local model IDs. Set `target_type` to `song`, `track`, `instrument`, `mixer` or `effect`. Supply `target_index` for every target except `song`. For an effect, also supply `effect_index` and `effect_target_type` (`track` or `mixer`). Get the current token with `live_inspect` and refresh discovery after changing the project or replacing a plugin.
+
+Pass the current `project_token` and a list of `{ model_id, value }` pairs to `live_set_parameters`. Use the discovered native units and ranges. The bridge validates the entire batch before applying it and returns the resulting parameter values. Changes stay in the open session until saved. This works for controls exposed by the Windows LMMS Agent Bridge. External Surge XT and Decent Sampler instruments use the offline VST3 renderer.
 
 Use `live_create_track` for instrument, sample, automation or Beat/Bassline tracks. Create a linked curve with `live_add_automation`, inspect it with `live_read_automation` and replace or upsert points with `live_edit_automation`. The helper links to track volume, panning or pitch.
 
