@@ -6,8 +6,9 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
-- Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
+- Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
+- Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
 - Add optional `render_atelier` and `render_theremin` stereo instrument stem tools.
 - Time-stretch WAV loops and chop drum breaks with sixteenth-note or transient slicing, pattern sequencing and a slice manifest.
 - `lmms-compose nightly` renders and ranks soundtrack cues unattended and builds dated audition pages.
