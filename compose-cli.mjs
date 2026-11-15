@@ -15,7 +15,7 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   count: { type: 'string' }, seed: { type: 'string' }, name: { type: 'string' }, help: { type: 'boolean', short: 'h' },
 } });
 if (values.help) {
-  console.log('Usage: lmms-compose [recipe.json] [--style chiptune|adventure|battle|ballad|swing] [--key "D minor"] [--bpm 120]\n       [--seconds 60 | --bars 32] [--count 6] [--seed 1] [--name piece]\nComposes --count seeds, renders each with LMMS and prints them ranked by measured checks.');
+  console.log('Usage: lmms-compose [recipe.json] [--style chiptune|adventure|battle|ballad|swing] [--key "D minor"] [--bpm 120]\n       [--seconds 60 | --bars 32] [--count 6] [--seed 1] [--name piece]\n       lmms-compose soundtrack recipe.json   (multi-cue soundtrack)\nComposes --count seeds, renders each with LMMS and prints them ranked by measured checks.\nA soundtrack recipe.json lists cues (menu, overworld, battle, etc.); each cue is composed as a batch and the best is exported with a game manifest.');
   process.exit(0);
 }
 const fromFile = positionals[0] ? JSON.parse(await readFile(positionals[0], 'utf8')) : {};
@@ -36,6 +36,26 @@ async function call(tool, args) {
   const text = result.content.find(item => item.type === 'text')?.text ?? '';
   if (result.isError) throw new Error(text);
   return JSON.parse(text);
+}
+
+// Soundtrack mode: recipe.json with a "cues" array
+if (fromFile.cues && Array.isArray(fromFile.cues)) {
+  console.log(`Soundtrack recipe: ${fromFile.cues.length} cues`);
+  const soundtrack = { name: fromFile.name ?? 'soundtrack', cues: [] };
+  for (const cue of fromFile.cues) {
+    const cueName = cue.name ?? cue.id ?? 'cue';
+    const cueCount = cue.count ?? count;
+    const cueSeed = cue.seed ?? seed;
+    console.log(`\nCue "${cueName}" (${cueCount} candidates)...`);
+    const { ranking } = await call('compose_batch', { ...cue, name: cueName, count: cueCount, seedStart: cueSeed });
+    const best = ranking[0];
+    soundtrack.cues.push({ ...cue, best: { audio: best.audio, score: best.score, project: best.project ?? `${cueName}-s${cueSeed}.mmp` } });
+    console.log(`  Best: ${best.audio} score ${best.score}`);
+  }
+  const manifestPath = path.join(workspace, `${soundtrack.name}.soundtrack.json`);
+  await import('node:fs/promises').then(fs => fs.writeFile(manifestPath, JSON.stringify(soundtrack, null, 2) + '\n'));
+  console.log(`\nSoundtrack manifest: ${manifestPath}`);
+  process.exit(0);
 }
 try {
   if (count > 1) {

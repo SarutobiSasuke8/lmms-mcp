@@ -1,0 +1,9 @@
+{
+  "name": "example-game",
+  "cues": [
+    { "name": "menu", "style": "adventure", "key": "C major", "seconds": 30, "count": 2, "seed": 1 },
+    { "name": "overworld", "style": "adventure", "key": "G major", "seconds": 60, "count": 2, "seed": 2 },
+    { "name": "battle", "style": "battle", "key": "A minor", "seconds": 45, "count": 2, "seed": 3 },
+    { "name": "victory", "style": "chiptune", "key": "C major", "seconds": 8, "count": 1, "seed": 4 }
+  ]
+}
