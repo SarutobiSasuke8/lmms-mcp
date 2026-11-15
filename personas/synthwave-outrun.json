@@ -1,0 +1,8 @@
+{
+  "id": "synthwave-outrun",
+  "bpm": { "min": 80, "max": 118, "default": 100 },
+  "description": "Gated-reverb snare, analog polys, 8th arpeggiated bass, chorus pads, neon atmosphere. Good for game menus and chase cues.",
+  "arrangement": "house",
+  "groove": "straight-techno",
+  "notes": "Gated snare and analog polys, not a supersaw festival lead."
+}
