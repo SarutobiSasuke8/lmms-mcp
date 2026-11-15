@@ -177,3 +177,39 @@ test('the structure check flags a piece whose sections do not differ', () => {
   assert.ok(structureCheck(flat).warnings.some(w => /sounds like/.test(w)));
   assert.ok(structureCheck({ ...piece, sections: piece.sections.filter(s => s.kind !== 'solo') }).warnings.some(w => /no solo/.test(w)));
 });
+
+test('reggae, dub and dubstep have their signatures', () => {
+  const notesOf = (piece, name) => piece.tracks.find(t => t.name === name)?.patterns[0].notes ?? [];
+  const inSection = (piece, name, kind) => { const s = piece.sections.find(x => x.kind === kind); return notesOf(piece, name).filter(n => n.tick >= s.startBar * 192 && n.tick < (s.startBar + s.bars) * 192); };
+  const stepsIn = (piece, name, bar) => notesOf(piece, name).filter(n => Math.floor(n.tick / 192) === bar).map(n => Math.round((n.tick - bar * 192) / 12));
+
+  const reggae = composePiece({ style: 'reggae', seconds: 80, seed: 2 });
+  const bar = reggae.sections.find(s => s.kind === 'theme').startBar + 1; // an ordinary bar: not a fill, not a section start
+  assert.deepEqual(stepsIn(reggae, 'Kick', bar), [8], 'one drop: the kick lands on beat three only');
+  assert.deepEqual(stepsIn(reggae, 'Snare', bar), [8]);
+  assert.ok(inSection(reggae, 'Harmony', 'theme').every(n => n.tick % 48 === 24), 'the skank sits on the off-beats');
+  assert.ok(inSection(reggae, 'Pad', 'theme').length > inSection(reggae, 'Harmony', 'theme').length, 'the organ bubbles around the skank');
+  assert.equal(notesOf(reggae, 'Siren').length, 0);
+
+  const dub = composePiece({ style: 'dub', seconds: 100, seed: 2 });
+  assert.deepEqual(stepsIn(dub, 'Kick', dub.sections.find(s => s.kind === 'theme').startBar + 1).filter(s => s % 4 === 0), [0, 4, 8, 12], 'steppers: four kicks to the bar');
+  const themeStabs = inSection(dub, 'Harmony', 'theme'), echoes = themeStabs.filter(n => n.tick % 48 !== 24);
+  assert.ok(echoes.length > 0, 'the dub echo adds repeats off the skank grid');
+  assert.ok(Math.max(...echoes.map(n => n.velocity)) < Math.max(...themeStabs.map(n => n.velocity)), 'echoes are quieter than the stab');
+  const solo = dub.sections.find(s => s.kind === 'solo');
+  assert.ok(inSection(dub, 'Harmony', 'solo').length < solo.bars * 6, 'the chords drop out under the dub solo');
+  assert.equal(inSection(dub, 'Pad', 'solo').length, 0);
+  assert.ok(inSection(dub, 'Bass', 'solo').length > 0 && inSection(dub, 'Kick', 'solo').length > 0, 'bass and drums carry the drop-out');
+  const siren = notesOf(dub, 'Siren');
+  assert.ok(siren.length >= 8 && siren.some(n => Math.floor(n.tick / 192) === solo.startBar - 1), 'a siren leads into the solo');
+
+  const dubstep = composePiece({ style: 'dubstep', seconds: 80, seed: 2 });
+  const drop = dubstep.sections.find(s => s.kind === 'theme').startBar + 1;
+  assert.deepEqual(stepsIn(dubstep, 'Snare', drop), [8], 'half-time: the snare lands on beat three');
+  assert.equal(stepsIn(dubstep, 'Kick', drop)[0], 0);
+  const wobble = inSection(dubstep, 'Bass', 'theme'), theme = dubstep.sections.find(s => s.kind === 'theme');
+  assert.ok(wobble.length / theme.bars >= 4, `the wobble retriggers: ${(wobble.length / theme.bars).toFixed(1)} notes a bar`);
+  assert.ok(new Set(wobble.map(n => n.length)).size >= 3, 'the wobble rate changes');
+  assert.ok(notesOf(dubstep, 'Siren').length >= 8);
+  for (const piece of [reggae, dub, dubstep]) assert.deepEqual(piece.structure.warnings, [], piece.style);
+});

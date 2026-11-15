@@ -194,6 +194,14 @@ The bridge uses the written pitches, note lengths and velocities. It interpolate
 
 `search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
 
+## Optional Atelier groovebox tools
+
+Link a local checkout of the private Atelier DSP engine with `npm link atelier-dsp` after registering the checkout with `npm link`, or set `LMMS_ATELIER_DSP` to the absolute path to its repository root. Use a branch that contains `src/groovebox/index.js`. The LMMS MCP server starts without the engine, and the groovebox tools report the local setup needed when called without it.
+
+- `groovebox_pattern` builds a 16-step project with per-hit velocity and a synth bass lane with accent and slide.
+- `load_pad_kit` validates a kit JSON file in `LMMS_WORKSPACE` and returns its pad data.
+- `render_groovebox` writes a new stereo WAV or MIDI file in `LMMS_WORKSPACE`. For sampler pads, pass a map from each pad's asset ID to the workspace WAV file.
+
 ## External VST3 instruments
 
 ### Companion tool coverage
