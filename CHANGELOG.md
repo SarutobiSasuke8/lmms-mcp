@@ -6,7 +6,13 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `write_loop_points`: write loop start and end into a WAV (`smpl` chunk) or OGG (`LOOPSTART`, `LOOPEND`, `LOOPLENGTH`) with a `.loop.json` sidecar, or tag a `prepare_loop` manifest's files in place.
+
 - `build_timeline_page`: one HTML page that shows a song as a DAW would, with each stem as a lane under a bar ruler, sections and DJ effects as blocks, synced playback with mute and solo, section looping, and notes pinned to bars that can be copied back. The library page links each track to its timeline.
+
+### Fixed
+
+- Loops that start with a drum hit are no longer flagged as clicking at the loop join. `analyze` reports `loop.boundaryStepDbfs`, and the warning fires only when the join jumps more than 6 dB above the step between neighbouring samples.
 
 ## 0.9.0 - 2026-11-15
 
