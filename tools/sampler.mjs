@@ -27,11 +27,11 @@ export function parseSummary(text) {
 
 export function register({ tool, z, root, moduleGuidance }) {
   moduleGuidance.push('For sampled instruments, put open SFZ libraries under LMMS_SAMPLE_LIBRARIES, run convert_sfz on each, then pass the .dspreset to render_vst3_stems with the decent-sampler instrument. See docs/sampler.md.');
-  tool('convert_sfz', 'Convert an SFZ instrument from LMMS_SAMPLE_LIBRARIES into a Decent Sampler .dspreset in the workspace, with absolute sample paths. Handles #define, #include, scope inheritance, key and velocity ranges, loops, round robin and envelopes. It keeps regions that are active at the SFZ default controller values and skips release triggers, keyswitches, cc-gated layers, LFOs and filters. Reports missing sample files, which are skipped.', {
+  tool('convert_sfz', 'Convert an SFZ instrument from LMMS_SAMPLE_LIBRARIES into a Decent Sampler .dspreset in the workspace, with absolute sample paths. Handles #define, #include (also inside a header line), scope inheritance, key and velocity ranges, loops, round robin and envelopes. It keeps regions that are active at the SFZ default controller values and default keyswitch, and applies controller modulation of envelopes, volume, tuning and velocity tracking at those defaults. It skips other keyswitches, cc-gated layers, controller-triggered regions such as pedal noise, LFOs and filters. Reports missing sample files, which are skipped.', {
     sfz: z.string().min(5).max(200).regex(/\.sfz$/i).describe('Path of the .sfz file relative to LMMS_SAMPLE_LIBRARIES.'),
     output: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.dspreset$/i),
     only: z.string().max(60).regex(/^[\w ./-]*$/).default('').describe('Keep only regions whose sample path contains this text, for example "alt_" or "/mid/".'),
-    keepReleases: z.boolean().default(false).describe('Also convert release-trigger samples.'),
+    keepReleases: z.boolean().default(false).describe('Also convert release-trigger samples, such as string resonance and hammer noise, as Decent Sampler release groups that play when a note ends. Use it for the Salamander piano.'),
   }, async ({ sfz, output, only, keepReleases }) => {
     const libraryEnv = process.env.LMMS_SAMPLE_LIBRARIES;
     if (!libraryEnv || !existsSync(libraryEnv)) throw new Error('Set LMMS_SAMPLE_LIBRARIES to the folder that holds your SFZ libraries. See docs/sampler.md.');
