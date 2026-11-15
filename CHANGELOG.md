@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `scale_lock`, `arpeggiate` and `note_probability`: edits (and `apply_edits` steps) that snap a track to a named scale, turn chords into arpeggios, and drop or vary notes by seeded chance. Drum tracks are skipped unless named.
 - `build_timeline_page`: one HTML page that shows a song as a DAW would, with each stem as a lane under a bar ruler, sections and DJ effects as blocks, synced playback with mute and solo, section looping, and notes pinned to bars that can be copied back. The library page links each track to its timeline.
 
 ## 0.9.0 - 2026-11-15
