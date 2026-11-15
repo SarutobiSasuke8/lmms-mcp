@@ -15,7 +15,7 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   count: { type: 'string' }, seed: { type: 'string' }, name: { type: 'string' }, help: { type: 'boolean', short: 'h' },
 } });
 if (values.help) {
-  console.log('Usage: lmms-compose [recipe.json] [--persona id] [--style chiptune|adventure|battle|ballad|swing] [--key "D minor"] [--bpm 120]\n       [--seconds 60 | --bars 32] [--count 6] [--seed 1] [--name piece]\nComposes --count seeds, renders each with LMMS and prints them ranked by measured checks.');
+  console.log('Usage: lmms-compose [recipe.json] [--persona id] [--style chiptune|adventure|battle|ballad|swing|reggae|dub|dubstep] [--key "D minor"] [--bpm 120]\n       [--seconds 60 | --bars 32] [--count 6] [--seed 1] [--name piece]\nComposes --count seeds, renders each with LMMS and prints them ranked by measured checks.');
   process.exit(0);
 }
 const fromFile = positionals[0] ? JSON.parse(await readFile(positionals[0], 'utf8')) : {};
