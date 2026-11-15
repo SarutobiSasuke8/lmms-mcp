@@ -88,6 +88,26 @@ def add_reverb(audio, settings, rate):
     return (audio + wet * settings.get("wet", 0.22)).astype(np.float32)
 
 
+def fit_plugin_audio(audio, frames, track):
+    import numpy as np
+
+    if audio.ndim != 2 or audio.shape[0] != 2:
+        raise ValueError(f"{track} returned an invalid stereo shape: {audio.shape}")
+    actual = audio.shape[1]
+    if abs(actual - frames) > 1 or actual == 0:
+        raise ValueError(f"{track} returned {actual} frames; expected {frames}")
+    if not np.isfinite(audio).all():
+        raise ValueError(f"{track} returned non-finite samples")
+    # A plugin host may round the seconds argument one sample either way.
+    if actual < frames:
+        audio = np.pad(audio, ((0, 0), (0, 1)))
+    elif actual > frames:
+        audio = audio[:, :frames]
+    if np.max(np.abs(audio)) < 0.0001:
+        raise ValueError(f"{track} produced silent audio")
+    return audio
+
+
 def main():
     if sys.argv[1] == "probe":
         print(json.dumps({name: importlib.util.find_spec(name) is not None
@@ -155,8 +175,7 @@ def main():
                 raise ValueError(f"Unknown plugin parameter: {name}")
             plugin.parameters[name].raw_value = value
         audio = plugin(events, duration=frames / rate, sample_rate=rate, num_channels=2, buffer_size=512)
-        if audio.shape != (2, frames) or not np.isfinite(audio).all() or np.max(np.abs(audio)) < 0.0001:
-            raise ValueError(f'{assignment["track"]} produced invalid or silent audio')
+        audio = fit_plugin_audio(audio, frames, assignment["track"])
         if assignment.get("width", 1) != 1:
             mid, side = (audio[0] + audio[1]) / 2, (audio[0] - audio[1]) / 2 * assignment["width"]
             audio = np.stack([mid + side, mid - side]).astype(np.float32)
