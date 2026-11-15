@@ -37,28 +37,30 @@ export function chopVocal(audio, { chops = 8, seed = 1 } = {}) {
   return { ...audio, channels: out };
 }
 
-export function register({ tool, z, root, dsp, moduleGuidance }) {
+export function register({ tool, z, root, dsp, moduleGuidance, schemas }) {
   moduleGuidance.push('render_vocal_chops generates short vocal-like syllables or chops an existing WAV into rhythmic slices. Deterministic.');
 
   tool('render_vocal_syllable', 'Render a short vocal-like syllable (a/e/i/o/u) to a WAV. Simple formant synthesis.', {
-    output: z.string().regex(/\\.wav$/i),
+    output: schemas.workspaceWav,
     vowel: z.enum(['a', 'e', 'i', 'o', 'u']).default('a'),
     duration: z.number().min(0.05).max(2).default(0.3),
   }, async ({ output, vowel, duration }) => {
     const samples = renderSyllable(vowel, duration);
-    const audio = { sampleRate: 48000, channels: [samples, samples], frames: samples.length };
+    const audio = { sampleRate: 48000, channels: [samples, samples.slice()], frames: samples.length };
+    dsp.limitTruePeak(audio, -1.01);
     await writeFile(path.join(root, output), dsp.encodeWav(audio), { flag: 'wx' });
     return { output, vowel, duration, frames: samples.length };
   });
 
   tool('chop_vocal', 'Slice a workspace vocal WAV into rhythmic chops. Seeded. Writes a new WAV.', {
-    input: z.string().regex(/\\.wav$/i),
-    output: z.string().regex(/\\.wav$/i),
+    input: schemas.workspaceWav,
+    output: schemas.workspaceWav,
     chops: z.number().int().min(2).max(32).default(8),
     seed: z.number().int().default(1),
   }, async ({ input, output, chops, seed }) => {
     const audio = dsp.decodeWav(await readFile(path.join(root, input)));
     const chopped = chopVocal(audio, { chops, seed });
+    dsp.limitTruePeak(chopped, -1.01);
     await writeFile(path.join(root, output), dsp.encodeWav(chopped), { flag: 'wx' });
     return { output, chops, seed };
   });

@@ -9,7 +9,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - Groove engine tools: `apply_groove` (MPC swing, UKG, house, amapiano, half-time), `humanize` (seeded timing/velocity), `add_ghost_notes`, `add_fills`, `layer_drums`. Deterministic. Operate on note arrays.
 - `arrangement_plan` generates bar-aligned section maps (intro/build/drop/breakdown/outro) with energy and role hints for house, techno, DnB and UKG. `energy_curve` extracts the envelope. Deterministic.
 - `render_vocal_syllable` generates short vocal-like syllables (a/e/i/o/u) with simple formant synthesis. `chop_vocal` slices a workspace vocal WAV into rhythmic chops. Deterministic.
-- Styles are available as data in `tools/styles.json` (canonical form). `compose.mjs` still owns the runtime object; the JSON is the editable source of truth for style definitions.
+- The composer loads its styles from `tools/styles.json`, including reggae, dub and dubstep.
 - `fatten` applies a per-sound design chain (unison/doubler, saturation, OTT-style 3-band compression, chorus, EQ tilt, stereo width with mono lows). Presets: fat lead, huge pad, reese grit, punchy kick, wide hats, dirty 808.
 - `layer_sounds` stacks 2–4 WAVs with gain matching. Both are additive to existing mix tools.
 - DJ persona pack A (club): dutch-trance, french-filter-house, carnival-party-house, chicago-acid, detroit-berlin-techno. JSON files in `personas/` ready for the persona loader.
@@ -44,6 +44,9 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - `setup-libraries-windows.ps1` fetches the Salamander Grand Piano (CC BY 3.0, about 720 MB) as the default piano. The Splendid Grand is still available with `-Only splendid`.
 
 ### Fixed
+
+- Dance tools accept workspace WAV names, honour requested arrangement lengths, apply 3:2 clave and half-time backbeats, and normalise partial ranking weights.
+- DJ presets follow the persona schema. Stock drum kits use valid sample names, report missing files, and carry local-only licence provenance through the catalogue.
 
 - Decent Sampler no longer renders silence after a preset is set: the worker polls the plug-in's state until the new preset is applied (Decent Sampler applies it on a background thread) before it plays the sound check.
 - Loops that start with a drum hit are no longer flagged as clicking at the loop join. `analyze` reports `loop.boundaryStepDbfs`, and the warning fires only when the join jumps more than 6 dB above the step between neighbouring samples.

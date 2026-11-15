@@ -1,10 +1,8 @@
 // Groove engine for dance styles: swing templates, humanise, ghost notes, fills, drum layering.
 // Deterministic for a seed. Operates on note arrays (tick, midi, velocity, length).
-import { writeFile } from 'node:fs/promises';
-import path from 'node:path';
-
 const BAR = 192; // ticks per bar at 48 ppq * 4
 const STEP = 12; // 16th note
+const clave = new Set([0, 6 * STEP, 12 * STEP, BAR + 4 * STEP, BAR + 8 * STEP]);
 
 function rng(seed) {
   let s = seed >>> 0 || 1;
@@ -21,12 +19,31 @@ const grooves = {
     if (pos > STEP * 5 && pos < STEP * 8) return tick + STEP * 0.1;
     return tick;
   },
-  'afro-clave': (tick) => tick, // placeholder; real clave is pattern-based
-  'half-time': (tick) => Math.round(tick * 0.5),
+  'afro-clave': (tick) => tick,
+  'half-time': (tick) => tick,
   'straight-techno': (tick) => tick,
 };
 
 export function applyGroove(notes, template = 'mpc-swing-60', strength = 1) {
+  if (strength === 0) return notes.map(note => ({ ...note }));
+  if (template === 'afro-clave') {
+    return notes.map(note => {
+      const accent = clave.has(note.tick % (2 * BAR)) ? 14 : -4;
+      const velocity = Math.round((note.velocity ?? 80) + accent * strength);
+      return { ...note, velocity: Math.max(1, Math.min(127, velocity)) };
+    });
+  }
+  if (template === 'half-time') {
+    // Shift a beat-two backbeat toward beat three, retaining the bar and other voices.
+    const snares = new Set(notes.filter(note => note.midi === 38 || note.midi === 40)
+      .map(note => `${note.midi}:${note.tick}`));
+    return notes.map(note => {
+      const shift = Math.round(4 * STEP * strength);
+      const backbeat = (note.midi === 38 || note.midi === 40) && note.tick % BAR === 4 * STEP;
+      const tick = backbeat && !snares.has(`${note.midi}:${note.tick + shift}`) ? note.tick + shift : note.tick;
+      return { ...note, tick };
+    }).sort((left, right) => left.tick - right.tick);
+  }
   const fn = grooves[template] ?? grooves['mpc-swing-60'];
   return notes.map(n => ({ ...n, tick: Math.round(n.tick + (fn(n.tick) - n.tick) * strength) }));
 }

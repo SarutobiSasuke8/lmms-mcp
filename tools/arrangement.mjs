@@ -39,9 +39,20 @@ const sections = {
 
 export function arrangementPlan(genre = 'house', totalBars = 64) {
   const template = sections[genre] ?? sections.house;
+  const extraBars = Math.max(0, totalBars - template.reduce((sum, section) => sum + section.bars, 0));
+  const sectionsToPlace = template.slice(0, -1);
+  const body = template.slice(1, -1);
+  let remaining = extraBars;
+  for (let index = 0; remaining > 0; index++) {
+    const section = body[index % body.length];
+    const bars = Math.min(remaining, section.bars);
+    sectionsToPlace.push({ ...section, bars });
+    remaining -= bars;
+  }
+  sectionsToPlace.push(template.at(-1));
   let bar = 0;
   const plan = [];
-  for (const s of template) {
+  for (const s of sectionsToPlace) {
     if (bar >= totalBars) break;
     const bars = Math.min(s.bars, totalBars - bar);
     plan.push({ ...s, startBar: bar, bars });

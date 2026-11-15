@@ -53,3 +53,18 @@ test('catalogue rejects inputs outside the workspace', async t => {
   const { store } = await fixture(t);
   await assert.rejects(store.backfill('..'), /outside the workspace/);
 });
+
+test('a factory drum render stays nonpublishable through backfill and mastering', async t => {
+  const { root } = await fixture(t);
+  const store = generationStore(root, { describeProject: async () => ({ usesFactoryDrums: true }) });
+  const [id] = await store.record('render_mix', { project: 'kit.mmp' }, { audio: 'mix.wav' });
+  const render = await store.show(id);
+  assert.equal(render.publishable, false);
+  assert.equal(render.sampleLibraries[0].licence, 'GPL-2.0-or-later');
+  await writeFile(path.join(root, 'master.wav'), 'master');
+  const [masterId] = await store.record('master_audio', { audio: 'mix.wav' }, { file: 'master.wav' });
+  assert.equal((await store.show(masterId)).sampleLibraries[0].id, 'lmms-factory-drums');
+  for (const backfillId of await store.backfill('.', ['salamander-grand-piano'])) {
+    assert.equal((await store.show(backfillId)).publishable, false);
+  }
+});

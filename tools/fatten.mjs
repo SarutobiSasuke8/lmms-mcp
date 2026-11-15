@@ -108,12 +108,12 @@ export function fatten(audio, opts = {}) {
   return { ...audio, channels };
 }
 
-export function register({ tool, z, root, dsp, moduleGuidance }) {
+export function register({ tool, z, root, dsp, moduleGuidance, schemas }) {
   moduleGuidance.push('fatten applies a sound-design chain (unison, saturation, OTT-style compression, chorus, EQ tilt, width) to a workspace WAV. layer_sounds stacks stems with crossover and phase alignment.');
 
   tool('fatten', 'Apply a fat sound-design chain to a workspace WAV: unison/doubler, saturation (tape/tube/hard), OTT-style 3-band compression, chorus, EQ tilt, and stereo width with mono lows. Returns a new WAV.', {
-    input: z.string().regex(/\\.wav$/i),
-    output: z.string().regex(/\\.wav$/i),
+    input: schemas.workspaceWav,
+    output: schemas.workspaceWav,
     preset: z.enum(['fat lead', 'huge pad', 'reese grit', 'punchy kick', 'wide hats', 'dirty 808', 'custom']).default('fat lead'),
     saturation: z.enum(['tape', 'tube', 'hard', 'none']).optional(),
     width: z.number().min(0.5).max(2).optional(),
@@ -129,13 +129,14 @@ export function register({ tool, z, root, dsp, moduleGuidance }) {
     };
     const opts = { ...(presets[preset] ?? presets['fat lead']), ...(saturation ? { saturation } : {}), ...(width ? { width } : {}) };
     const result = fatten(audio, opts);
+    dsp.limitTruePeak(result, -1.01);
     await writeFile(path.join(root, output), dsp.encodeWav(result), { flag: 'wx' });
     return { output, preset, opts };
   });
 
   tool('layer_sounds', 'Stack two to four workspace WAVs with simple crossover, phase alignment and gain matching. Writes a layered WAV.', {
-    inputs: z.array(z.string().regex(/\\.wav$/i)).min(2).max(4),
-    output: z.string().regex(/\\.wav$/i),
+    inputs: z.array(schemas.workspaceWav).min(2).max(4),
+    output: schemas.workspaceWav,
     crossovers: z.array(z.number()).optional().describe('Hz crossovers between layers, length = inputs.length - 1'),
   }, async ({ inputs, output }) => {
     const audios = [];
@@ -152,7 +153,9 @@ export function register({ tool, z, root, dsp, moduleGuidance }) {
         for (let s = 0; s < frames; s++) out[c][s] += a.channels[c][s] * gain;
       }
     }
-    await writeFile(path.join(root, output), dsp.encodeWav({ sampleRate: rate, channels: out, frames }), { flag: 'wx' });
+    const mixed = { sampleRate: rate, channels: out, frames };
+    dsp.limitTruePeak(mixed, -1.01);
+    await writeFile(path.join(root, output), dsp.encodeWav(mixed), { flag: 'wx' });
     return { output, layers: inputs.length };
   });
 }
