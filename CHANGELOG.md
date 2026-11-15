@@ -41,7 +41,7 @@ No tool changes.
 
 ### Added
 
-- Published to npm as `@sarutobi-sasuke/lmms-mcp`. Run it with `npx -y @sarutobi-sasuke/lmms-mcp`. Releases are published from CI with provenance when a version tag is pushed.
+- Added the npm release workflow for `@sarutobi-sasuke/lmms-mcp`. This version was never tagged or published: the package first reached npm as 0.9.0.
 
 ### Compatibility
 
