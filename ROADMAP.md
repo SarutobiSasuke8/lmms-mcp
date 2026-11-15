@@ -16,9 +16,23 @@ What is done, what is next and what is only an idea. Tool changes are recorded i
 
 - [ ] Smooth tempo curves for rubato at finer than 48 ticks per beat, and longer important notes
 - [ ] Recorded impulse responses of real churches and halls (for example OpenAIR, mostly CC BY), as `space` options with credits
-- [ ] A mastering chain: EQ toward a reference with `compare_to_reference`, light glue compression, tape-style saturation, oversampled true-peak limiting and dither
+- [ ] A mastering chain: EQ toward a reference with `compare_to_reference`, light glue compression, tape-style saturation, oversampled true-peak limiting and dither, fed by VST3 effect plugins (compressors, saturation, reverbs) hosted in `render_vst3_stems`, not only instrument plugins
 - [ ] Close and room mic perspectives blended, where a library has both
 - [ ] Pedal noise for libraries that trigger it from CC64
+- [ ] Articulations from SFZ libraries: keyswitches, legato and vibrato in `convert_sfz` and render, so the sax is not limited to sustained notes
+
+## Next: honest loops and clean renders
+
+- [ ] `export_game_audio` must not report `seamless: true` when `analyze_audio` warns of a loop click (the battle loop got worse after export)
+- [ ] Remove the DC offset from renders (about 0.027 to 0.029 on every render, which costs about 4 quality points)
+- [ ] `sounds: "suggested"` must not pick a bass preset (for example TripleOscillator/PMFMFTWbass.xpf) for a lead
+- [ ] A motif containing `8` should not give the misleading error `Motif note "1" is outside MIDI 12-119` (`1'` already works)
+- [ ] `npx` should work when run inside the source checkout (it currently fails with `lmms-mcp: not found`)
+
+## Next: real instruments on Linux and more libraries
+
+- [ ] A Linux setup script for Decent Sampler, the pedalboard host and the open libraries, and the sampler and VST3 path run in CI on Linux, so this box and the VPS can render real instruments
+- [ ] SoundFont (`.sf2`) support with no conversion step
 
 ## Next: arrangements of public-domain pieces
 
@@ -33,6 +47,8 @@ What is done, what is next and what is only an idea. Tool changes are recorded i
 
 - [ ] Rokumon Sudoku: a choice of calm classical tracks
 - [ ] Rokumon Cat Café: café-style arrangements
+- [ ] Direct game-engine delivery: `export_game_audio` writes adaptive layers with a manifest that Phaser and Godot can load, so intensity can switch without hand-wiring
+- [ ] Headless batch scoring on the VPS: `lmms-compose` drafts candidate tracks per Rokumon game overnight, then favourites are picked on the audition page
 
 ## Ideas
 
