@@ -10,6 +10,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - `arrangement_plan` generates bar-aligned section maps (intro/build/drop/breakdown/outro) with energy and role hints for house, techno, DnB and UKG. `energy_curve` extracts the envelope. Deterministic.
 - `render_vocal_syllable` generates short vocal-like syllables (a/e/i/o/u) with simple formant synthesis. `chop_vocal` slices a workspace vocal WAV into rhythmic chops. Deterministic.
 - Styles are available as data in `tools/styles.json` (canonical form). `compose.mjs` still owns the runtime object; the JSON is the editable source of truth for style definitions.
+- `fatten` applies a per-sound design chain (unison/doubler, saturation, OTT-style 3-band compression, chorus, EQ tilt, stereo width with mono lows). Presets: fat lead, huge pad, reese grit, punchy kick, wide hats, dirty 808.
+- `layer_sounds` stacks 2–4 WAVs with gain matching. Both are additive to existing mix tools.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
 - Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
