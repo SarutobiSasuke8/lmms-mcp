@@ -177,7 +177,7 @@ details.src{font-size:12.5px;margin-top:2px}details.src summary{cursor:pointer;c
 <div class="row"><input id="q" type="search" placeholder="Search names, folders, tags…" autocomplete="off">
 <select id="source"><option value="">All sources</option></select><select id="role"><option value="">All roles</option></select>
 <select id="sort"><option value="name">Sort: name</option><option value="source">Sort: source</option><option value="bright">Sort: brightest first</option><option value="rating">Sort: best rated</option><option value="newest">Sort: newest first</option></select>
-<button id="playable" type="button">Playable only</button><button id="starred" type="button">★ Picks only</button><button id="clear" type="button">Clear filters</button><span class="count" id="count"></span></div>
+<a href="/mix-desk/">Mix Desk</a><button id="playable" type="button">Playable only</button><button id="starred" type="button">★ Picks only</button><button id="clear" type="button">Clear filters</button><span class="count" id="count"></span></div>
 <div class="row types" id="types"></div><div class="row facets" id="facets" hidden></div><div class="tags" id="tags"></div>
 </header>
 <main><div id="list"></div><button class="more" id="more" type="button" hidden>Show more</button><p class="note" id="notes"></p></main>
@@ -253,6 +253,10 @@ function draw(){
     var row=el('div','item'+(index===state.sel?' sel':''));row.dataset.index=index;
     var play=el('button','play',it.u?'▶':'–');play.type='button';play.disabled=!it.u;play.title=it.u?'Listen':'No audio for this item yet';play.onclick=function(){select(index,true)};row.appendChild(play);
     var text=el('div');text.appendChild(el('div','name',it.n));text.appendChild(el('div','path',it.t==='phrase'?it.p:(it.s+(it.c?' / '+it.c:''))));if(it.d)text.appendChild(el('div','desc',it.d));
+    if(it.w&&it.u&&location.protocol.indexOf('http')===0){
+      var desk=el('a','open','Add to desk');desk.href='/mix-desk/?sample='+encodeURIComponent(it.w)+'&label='+encodeURIComponent(it.n);
+      text.appendChild(desk);
+    }
     if(it.a){var link=el('a','open','Open mixer page (layers, sections, feedback)');link.href=it.a;link.target='_blank';link.rel='noopener';text.appendChild(link)}
     if(it.y){var tl=el('a','open','Open timeline (stems as lanes)');tl.href=it.y;tl.target='_blank';tl.rel='noopener';tl.style.marginRight='12px';text.insertBefore(tl,text.querySelector('a.open'))}
     if(it.su&&/^https?:/.test(it.su)){var sl=el('a','open','Score or source');sl.href=it.su;sl.target='_blank';sl.rel='noopener noreferrer';sl.style.marginRight='12px';text.appendChild(sl)}
