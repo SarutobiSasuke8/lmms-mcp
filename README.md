@@ -41,6 +41,7 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Start fast | `list_blueprints`, `create_from_blueprint`, `develop_motif` ([docs/blueprints.md](docs/blueprints.md)) |
 | Write tunes | `write_melody`, `write_accompaniment` ([docs/melody.md](docs/melody.md)) |
 | Whole pieces | `compose_piece`, `compose_batch`, and `lmms-compose` on the command line with no agent ([docs/compose.md](docs/compose.md)) |
+| DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio` |
 | Check | `set_track_role`, `lint_arrangement`, `quality_report` ([docs/arranger-lint.md](docs/arranger-lint.md)) |
 | Balance | `auto_balance`, `compare_to_reference` ([docs/balance.md](docs/balance.md)) |
 | Loops | `find_loop_points`, `prepare_loop` ([docs/loop-prep.md](docs/loop-prep.md)) |
