@@ -61,8 +61,26 @@ def make_state(template_state, dspreset_text, sample_path, name="preset"):
     return pack(outer.encode("utf-8"), outer_tail)
 
 
-def load_dspreset(plugin, dspreset_path, sample_path, name="preset"):
+def load_dspreset(plugin, dspreset_path, sample_path, name="preset", wait=True):
     with open(dspreset_path, encoding="utf-8") as handle:
         text = handle.read()
     plugin.raw_state = make_state(plugin.raw_state, text, sample_path.replace("\\", "/"), name)
+    if wait and wait_until_loaded(plugin) is None:
+        raise RuntimeError(f"{name}: the preset loaded but no key makes a sound. Check that its sample files exist.")
     return plugin
+
+
+def wait_until_loaded(plugin, timeout=30.0):
+    """Decent Sampler loads samples on a background thread, and a render that starts first is silent.
+    Play a quiet probe across the keyboard until sound comes back. Returns the seconds waited, or None if it never sounded."""
+    import time
+    import numpy as np
+    probe = [(bytes([0x90, note, 64]), 0.0) for note in range(24, 103, 3)] + [(bytes([0x80, note, 0]), 0.2) for note in range(24, 103, 3)]
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        audio = plugin(probe, duration=0.3, sample_rate=48000, num_channels=2, buffer_size=512)
+        if float(np.max(np.abs(audio))) > 1e-4:
+            plugin([(bytes([0xB0, 123, 0]), 0.0)], duration=0.6, sample_rate=48000, num_channels=2, buffer_size=512)  # all notes off, let it ring out
+            return time.monotonic() - started
+        time.sleep(0.25)
+    return None

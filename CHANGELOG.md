@@ -18,6 +18,11 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 - `compose_piece` now plans a form to fit the length: theme, contrast, a solo that opens by quoting the theme, a varied return and an ending, with the accompaniment, bass and drums changing from section to section. Its result gains `form` and `structure`, and each section has a `kind`. `compose_batch` ranks with a structure check. New accompaniment style `held`.
 
+### Fixed
+
+- `convert_sfz` now follows `#include` written in the middle of a line, keeps the default keyswitch articulation, and skips controller-triggered and unplayable regions. The Salamander grand piano converts with all 16 velocity layers instead of one sample.
+- Decent Sampler renders wait until the samples have loaded, so the start of a render is no longer silent with large libraries.
+
 ## 0.9.0 - 2026-11-15
 
 No breaking changes. Every 0.8.1 tool keeps its name and its required arguments.

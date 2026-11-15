@@ -6,7 +6,7 @@ Sample paths are written relative to --root (default: the sfz folder), or absolu
 Handles #define, #include, <control>/<global>/<master>/<group>/<region> inheritance, default_path,
 key names, velocity ranges, loops, offsets, tuning, volume, pan, ampeg, round robin (seq_*), and
 keeps only regions whose cc/keyswitch conditions hold at the SFZ's default controller values.
-Skipped: trigger=release, keyswitched articulations, cc-gated layers, LFOs, filters and effects.
+A keyswitched library keeps its default articulation (sw_default). Skipped: trigger=release, other keyswitched\narticulations, cc-gated and cc-triggered layers, LFOs, filters and effects.
 """
 import re, sys, os, argparse
 from xml.sax.saxutils import quoteattr
@@ -37,6 +37,7 @@ def key(v):
 
 
 def preprocess(path, defines, depth=0, main_dir=None):
+    """Expand #define and #include, in order. Both may appear anywhere on a line, and a later #define replaces an earlier one."""
     if depth > 12:
         raise RuntimeError("include depth")
     out = []
@@ -45,6 +46,13 @@ def preprocess(path, defines, depth=0, main_dir=None):
     with open(path, encoding="utf-8", errors="replace") as handle:
         text = handle.read()
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+
+    def substitute(value):
+        for name in sorted(defines, key=len, reverse=True):
+            if name in value:
+                value = value.replace(name, defines[name])
+        return value
+
     for line in text.splitlines():
         line = re.sub(r"//.*$", "", line).rstrip()
         s = line.strip()
@@ -54,22 +62,19 @@ def preprocess(path, defines, depth=0, main_dir=None):
             parts = s.split(None, 2)
             defines[parts[1]] = parts[2].strip() if len(parts) > 2 else ""
             continue
-        if s.startswith("#include"):
-            for name in sorted(defines, key=len, reverse=True):
-                s = s.replace(name, defines[name])
-            m = re.search(r'"([^"]+)"', s)
-            rel = m.group(1).replace("\\", "/")
+        pieces = re.split(r'#include\s+"([^"]+)"', line)  # text, path, text, path, ...
+        for index, piece in enumerate(pieces):
+            if index % 2 == 0:
+                if piece.strip():
+                    out.append(substitute(piece))
+                continue
+            rel = substitute(piece).replace("\\", "/")
             inc = os.path.normpath(os.path.join(main_dir, rel))  # SFZ spec: relative to the main file
             if not os.path.exists(inc):
                 inc = os.path.normpath(os.path.join(base, rel))
             if not inside(inc):
                 raise ValueError(f"#include outside the library folder: {rel}")
             out.extend(preprocess(inc, defines, depth + 1, main_dir))
-            continue
-        for name in sorted(defines, key=len, reverse=True):
-            if name in line:
-                line = line.replace(name, defines[name])
-        out.append(line)
     return out
 
 
@@ -119,7 +124,20 @@ def parse(path):
 def active(r, cc, keep_releases):
     if not keep_releases and r.get("trigger", "attack") in ("release", "release_key"):
         return False
-    if "sw_last" in r or "sw_previous" in r or "sw_up" in r or "sw_down" in r:
+    if "sw_previous" in r or "sw_up" in r or "sw_down" in r:
+        return False
+    if "sw_last" in r:  # keep the articulation that is selected when nothing has been switched
+        try:
+            if "sw_default" not in r or key(r["sw_last"]) != key(r["sw_default"]):
+                return False
+        except ValueError:
+            return False
+    if any(re.fullmatch(r"on_(lo|hi)(hd)?cc\d+", k) for k in r):  # played by a controller, such as pedal noise
+        return False
+    try:
+        if "hikey" in r and key(r["hikey"]) < 0:  # hikey=-1 means the region is never played from the keyboard
+            return False
+    except ValueError:
         return False
     for k, v in r.items():
         m = re.fullmatch(r"(lo|hi)cc(\d+)", k)
