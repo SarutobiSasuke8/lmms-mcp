@@ -215,9 +215,11 @@ const patterns = {
   broken: { step: 48, shape: [0, 2, 1, 2] },
   block: { step: 96, shape: ['chord', 'chord'] },
   held: { step: 192, shape: ['chord'] }, // one chord a bar, for backing a solo
+  skank: { step: 48, shape: ['offbeat'] }, // reggae guitar or piano: a short chord on every off-beat
+  bubble: { step: 48, shape: ['offbeat'] }, // reggae organ: the off-beat chord with quiet low notes either side
 };
 export const accompanimentStyles = Object.keys(patterns);
-export function writeAccompaniment({ chords, bars, seed = 1, low = 36, high = 67, style = 'arpeggio', baseVelocity = 56, dynamics = 1, pedal = true, plan: melodyPlan = [], final: endsPiece = true } = {}) {
+export function writeAccompaniment({ chords, bars, seed = 1, low = 36, high = 67, style = 'arpeggio', baseVelocity = 56, dynamics = 1, pedal = true, plan: melodyPlan = [], final: endsPiece = true, echo = 0 } = {}) {
   if (!patterns[style]) throw new Error(`Unknown style "${style}". Use one of: ${accompanimentStyles.join(', ')}`);
   const plan = chordPlan(chords, bars), random = rng(seed + 7919), { step, shape } = patterns[style];
   const liftAt = bar => melodyPlan.find(p => bar >= p.bar && bar < p.bar + p.bars)?.liftDegrees ?? 0;
@@ -239,6 +241,22 @@ export function writeAccompaniment({ chords, bars, seed = 1, low = 36, high = 67
       if (final || style === 'block' || style === 'held') {
         const hits = final || style === 'held' ? [0] : [0, 96].filter(t => t < span);
         for (const t of hits) for (const m of [ladder[0], ladder[1], ladder[2], ladder[3]]) notes.push({ tick: from + t, length: (final || style === 'held' ? span : Math.min(96, span - t)) - 4, midi: m, velocity: Math.round(clamp(baseVelocity + swell + (t ? -6 : 2) - (final ? 4 : 0) + random.spread(2), 1, 127)) });
+        return;
+      }
+      if (style === 'skank' || style === 'bubble') {
+        const stab = [ladder[2], ladder[3], ladder[2] + 7].map(m => m > high ? m - 12 : m);
+        const beats = Math.round(span / 48);
+        for (let beat = 0; beat < beats; beat++) {
+          const at = from + beat * 48 + 24, loud = baseVelocity + swell + (beat % 2 ? 3 : -1) + random.spread(2);
+          for (const m of style === 'bubble' ? stab.slice(0, 2) : stab) notes.push({ tick: at, length: style === 'bubble' ? 14 : 18, midi: m, velocity: Math.round(clamp(loud, 1, 127)) });
+          if (style === 'bubble') for (const t of [12, 36]) notes.push({ tick: from + beat * 48 + t, length: 10, midi: ladder[1], velocity: Math.round(clamp(loud - 18, 1, 127)) });
+          // Dub echo: the last stab of the bar repeats on dotted eighths and fades.
+          if (echo > 0 && beat === beats - 1) for (let k = 1; k <= echo; k++) {
+            const t = at + k * 36;
+            if (t + 16 > bars * BAR) break;
+            for (const m of stab.slice(1)) notes.push({ tick: t, length: 16, midi: m, velocity: Math.round(clamp(loud * 0.62 ** k, 1, 127)) });
+          }
+        }
         return;
       }
       for (let t = 0, i = 0; t < span; t += step, i++) {
@@ -276,6 +294,7 @@ export function register({ tool, z, moduleGuidance }) {
     seed: z.number().int().min(1).max(2147483647).default(1), low: z.number().int().min(24).max(72).default(36), high: z.number().int().min(36).max(96).default(67),
     baseVelocity: z.number().int().min(20).max(120).default(56), dynamics: z.number().min(0).max(2).default(1),
     pedal: z.boolean().default(true).describe('Let every note ring until the chord changes.'),
+    echo: z.number().int().min(0).max(6).default(0).describe('For skank and bubble: how many fading dub echoes follow the last off-beat chord of each bar.'),
     plan: z.array(z.object({ bar: z.number().int().min(0), bars: z.number().int().min(1), liftDegrees: z.number() }).passthrough()).max(64).default([]),
     name: z.string().min(1).max(100).default('Accompaniment'), bar: z.number().int().min(0).max(999).default(0),
   }, async ({ name, bar, ...options }) => {
