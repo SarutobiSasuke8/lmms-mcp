@@ -15,6 +15,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - DJ persona pack A (club): dutch-trance, french-filter-house, carnival-party-house, chicago-acid, detroit-berlin-techno. JSON files in `personas/` ready for the persona loader.
 - DJ persona pack B (bass and hard): drum-and-bass, uk-garage, dubstep-bass, hardstyle-gabber, cinematic-psytrance. JSON files in `personas/`.
 - DJ persona pack C (groove and retro): g-funk, lofi-boom-bap, afro-amapiano, synthwave-outrun. JSON files in `personas/`.
+- `rank_candidates` re-ranks compose results with adjustable weights (arrangement / mix / tune). `learn_from_scores` adjusts those weights from preferred-vs-rejected listener feedback. Deterministic.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
 - Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
