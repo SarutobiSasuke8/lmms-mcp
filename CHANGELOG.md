@@ -4,7 +4,15 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+### Fixed
+
+- `export_game_audio` no longer reports `seamless: true` when `analyze_audio` warns of a loop click. The manifest now sets `seamless` from the actual loop-click check and records the issue.
+- Renders no longer carry a DC offset of ~0.027. Mean subtraction is applied in the master path of `export_game_audio` (and available via `dsp.removeDc`).
+- `sounds: "suggested"` no longer picks bass-category presets for lead or counter-melody roles.
+- Motifs containing the digit `8` are mapped to the upper tonic instead of producing a misleading out-of-range error. The error message now names the actual token.
+
 ### Added
+
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `convert_sfz` applies controller modulation at the default values (`*_onccN` for envelopes, volume, pan, tuning, offset and velocity tracking) with the standard SFZ curves, so the Salamander Grand gets its intended 73% velocity tracking and 1 second release. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends.

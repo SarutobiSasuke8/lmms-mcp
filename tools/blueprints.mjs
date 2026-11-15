@@ -351,7 +351,8 @@ export function suggestPresets(sounds, role, { prefer = [], exclude = [], limit 
   const avoid = role === 'lead' || role === 'counter' || role === 'bass' || rhythmic ? ['slow-attack', 'quiet'] : ['quiet', 'percussive'];
   return Object.entries(sounds)
     .filter(([name, f]) => name.endsWith('.xpf') && !exclude.includes(name) && wanted.includes(f.role) && f.pitched && f.peakDbfs !== null
-      && f.peakDbfs >= -24 && f.peakDbfs <= -3 && Math.abs(f.pitchOffset) <= 24 && f.pitchOffset % 12 === 0 && !avoid.some(t => f.tags?.includes(t)))
+      && f.peakDbfs >= -24 && f.peakDbfs <= -3 && Math.abs(f.pitchOffset) <= 24 && f.pitchOffset % 12 === 0 && !avoid.some(t => f.tags?.includes(t))
+      && !( (role === 'lead' || role === 'counter') && (f.role === 'bass' || /bass/i.test(name)) ))
     .map(([name, f]) => ({ preset: name, score: prefer.filter(t => f.tags?.includes(t)).length * 3 - Math.abs(f.peakDbfs + 10) / 4 - (f.tags?.includes('long-release') && role !== 'harmony' && role !== 'texture' ? 2 : 0), f }))
     .sort((a, b) => b.score - a.score || a.preset.localeCompare(b.preset))
     .slice(0, limit)

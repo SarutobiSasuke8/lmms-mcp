@@ -1657,6 +1657,8 @@ tool('export_game_audio', 'Export a song for a game engine in one call: a seamle
     const files = [];
     const emit = async (file, audio, role, extra = {}, { limiter = false, wrap = false } = {}) => {
       dsp.applyGain(audio, gain);
+      dsp.removeDc(audio);
+      dsp.removeDc(audio);
       const limited = limiter && ceiling !== undefined ? dsp.limit(audio, ceiling, { wrap }) : null;
       const wav = dsp.encodeWav(audio);
       await writeFile(path.join(destination, file + '.wav'), wav, { flag: 'wx' });
@@ -1693,9 +1695,13 @@ tool('export_game_audio', 'Export a song for a game engine in one call: a seamle
       const audio = dsp.fade(dsp.slice(full, start, end), 48, Math.min(end - start, Math.round(info.secondsPerBar * sampleRate)));
       await emit(`${name}-stinger-${stinger.name}`, audio, 'stinger', { startBar: stinger.startBar, bars: stinger.bars }, { limiter: true });
     }
+        const loopReport = dsp.analyze(finalLoop);
+    const loopWarnings = dsp.advise(loopReport, { loop: true });
+    const hasLoopClick = loopWarnings.some(w => w.includes('click at the loop point'));
+    const seamless = !hasLoopClick;
     const manifest = { name, source: project, bpm: info.bpm, timeSignature: info.meter, bars: info.lengthBars, sampleRate, channels: 2,
       gainDb: Number(gainDb.toFixed(2)), ...(targetLufs !== undefined ? { targetLufs } : {}), ...(ceiling !== undefined ? { ceilingDb: ceiling } : {}),
-      loop: { file: `${name}-loop.wav`, startFrame: 0, endFrame: loop.frames, seamless: true, tail: 'folded into the loop start' },
+      loop: { file: `${name}-loop.wav`, startFrame: 0, endFrame: loop.frames, seamless, tail: 'folded into the loop start', ...(hasLoopClick ? { seamIssues: ['analyze_audio warned of a loop click'] } : {}) },
       ...(intro ? { intro: { file: `${name}-intro.wav`, frames: intro.frames, then: `${name}-loop.wav` } } : {}),
       ...(residualDb !== undefined ? { layersSumResidualDb: residualDb } : {}), files, ...(notes.length ? { notes } : {}) };
     await writeFile(path.join(destination, `${name}.manifest.json`), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });

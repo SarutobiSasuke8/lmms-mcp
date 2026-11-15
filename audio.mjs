@@ -69,6 +69,19 @@ export function applyGain(audio, gain) {
   for (const ch of audio.channels) for (let i = 0; i < ch.length; i++) ch[i] *= gain;
   return audio;
 }
+// Subtract the mean of each channel so renders no longer carry a DC offset.
+export function removeDc(audio) {
+  for (const ch of audio.channels) {
+    if (!ch.length) continue;
+    let sum = 0;
+    for (let i = 0; i < ch.length; i++) sum += ch[i];
+    const mean = sum / ch.length;
+    if (Math.abs(mean) > 1e-6) {
+      for (let i = 0; i < ch.length; i++) ch[i] -= mean;
+    }
+  }
+  return audio;
+}
 export function samplePeak(audio, start = 0, end = audio.frames) {
   let peak = 0;
   for (const ch of audio.channels) for (let i = start; i < end; i++) { const v = Math.abs(ch[i]); if (v > peak) peak = v; }

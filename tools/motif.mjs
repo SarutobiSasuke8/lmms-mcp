@@ -65,7 +65,13 @@ export function parseLine(line) {
     if (!(steps > 0)) throw new Error(`Motif token "${token}" needs a positive length in steps`);
     const rest = /^[rR_]$/.test(match[1]);
     const midi = rest ? null : noteNumber(match[1]);
-    if (midi !== null && (midi < 12 || midi > 119)) throw new Error(`Motif note "${match[1]}" is outside MIDI 12-119. Use note names such as D5, or scale degrees 1-7 for every token.`);
+    if (midi !== null && (midi < 12 || midi > 119)) {
+      // Bare digit 8 is often intended as the upper tonic (degree 1 of the next octave)
+      if (/^8$/.test(match[1])) {
+        // leave for caller; we just give a clearer message for now
+      }
+      throw new Error(`Motif note "${match[1]}" is outside MIDI 12-119. Use note names such as D5, or scale degrees 1-7 (8 maps to the upper tonic) for every token.`);
+    }
     return { midi, steps, ...(match[3] && !rest ? { velocity: Number(match[3]) } : {}) };
   });
 }
@@ -86,13 +92,15 @@ export function fromNotes(notes, stepsPerBar = 16) {
 // Scale-degree motifs for blueprints: "1:2 3:2 5:4 r:2". ' raises an octave, , lowers one.
 export function parseDegrees(text, key) {
   return String(text).trim().split(/\s+/).map(token => {
-    const match = /^(r|[1-7])([',]*)(?::([\d.]+))?(?::(\d+))?$/.exec(token);
+    const match = /^(r|[1-8])([',]*)(?::([\d.]+))?(?::(\d+))?$/.exec(token);
     if (!match) throw new Error(`Cannot read degree token "${token}". Use 1-7 with ' or , for octaves, then :steps and optionally :velocity.`);
     const steps = Number(match[3] ?? 1);
     if (!(steps > 0)) throw new Error(`Degree token "${token}" needs a positive length in steps`);
     if (match[1] === 'r') return { midi: null, steps };
     const octave = [...match[2]].reduce((sum, c) => sum + (c === "'" ? 1 : -1), 0);
-    return { midi: fromDegree(Number(match[1]) - 1 + octave * 7 + 28, key), steps, ...(match[4] ? { velocity: Number(match[4]) } : {}) };
+    const deg = Number(match[1]);
+    const adjusted = deg === 8 ? 0 + 7 : deg - 1; // 8 -> upper tonic
+    return { midi: fromDegree(adjusted + octave * 7 + 28, key), steps, ...(match[4] ? { velocity: Number(match[4]) } : {}) };
   });
 }
 export function readMotif(input, key, { stepsPerBar = 16 } = {}) {
