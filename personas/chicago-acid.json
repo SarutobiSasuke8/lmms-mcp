@@ -1,0 +1,8 @@
+{
+  "id": "chicago-acid",
+  "bpm": { "min": 118, "max": 128, "default": 124 },
+  "description": "Resonant 303-style bass with accent and slide, raw drum-machine kit, jacking hats.",
+  "arrangement": "techno",
+  "groove": "straight-techno",
+  "notes": "Accent and slide movement on the bass."
+}

@@ -1,0 +1,8 @@
+{
+  "id": "carnival-party-house",
+  "bpm": { "min": 120, "max": 130, "default": 126 },
+  "description": "Late-90s big-room party starter. Kaleidoscopic, theatrical, unpredictable. 4/4 plus breakbeat cuts, horn stabs, sudden dropouts.",
+  "arrangement": "house",
+  "groove": "house-shuffle",
+  "notes": "Changes character and surprises. Not a single looping groove."
+}

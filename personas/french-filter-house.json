@@ -1,0 +1,8 @@
+{
+  "id": "french-filter-house",
+  "bpm": { "min": 118, "max": 124, "default": 122 },
+  "description": "Sidechained filtered disco or funk loops, filter automation as the hook, tight compressed drums, funky bass.",
+  "arrangement": "house",
+  "groove": "house-shuffle",
+  "notes": "Driven by the filter, not a stacked supersaw."
+}
