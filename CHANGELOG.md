@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `render_vst3_stems` accepts an optional `effects` array per track. Each entry can be a built-in pedalboard effect (`compressor`, `distortion`, `reverb`, `limiter`) or a VST3 effect plugin path. The chain is applied after the instrument (and after any EQ/space/reverb). Additive to existing options.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
 - Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.

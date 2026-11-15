@@ -60,3 +60,18 @@ The state layout comes from Decent Sampler 1.42.1. A different version may chang
 - No keyswitches, legato, vibrato, filters or effects from the SFZ. The sax plays its sustain articulation.
 - Release samples are skipped, so a piano has no key-off noise or pedal sounds.
 - A `.dspreset` points at the library's files. Move the library and convert again.
+
+
+## Effect chains on VST3 stems
+
+`render_vst3_stems` can apply an optional effect chain per track:
+
+```
+effects: [
+  { type: "compressor", thresholdDb: -18, ratio: 4 },
+  { type: "limiter", thresholdDb: -1 },
+  { plugin: "/path/to/SomeEffect.vst3" }
+]
+```
+
+Built-in effects (`compressor`, `distortion`, `reverb`, `limiter`) need no third-party plugins. VST3 effect plugins are loaded via pedalboard. The chain runs after the instrument and any EQ/space/reverb. A few free effects that work well: TAL-Reverb, Valhalla Supermassive (if available as VST3), or the built-ins above.
