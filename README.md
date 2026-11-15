@@ -20,7 +20,7 @@ Configure a stdio MCP client with command `node` and the absolute path to `serve
 | `LMMS_PARALLEL_RENDERS` | Renders run side by side for stems and layers (1 to 4, default 3) |
 | `LMMS_SAMPLE_LIBRARIES` | Folder of open SFZ libraries for `convert_sfz` (optional, see [docs/sampler.md](docs/sampler.md)) |
 
-To run the published package, use `npx -y @sarutobi-sasuke/lmms-mcp`. For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.8.1.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
+To run the published package, use `npx -y @sarutobi-sasuke/lmms-mcp`. For an install that follows a fixed GitHub release, run `npx -y https://github.com/SarutobiSasuke8/lmms-mcp/archive/refs/tags/v0.9.0.tar.gz`. Configure your client to launch that command over stdio with `LMMS_WORKSPACE` set. Install LMMS separately.
 
 On connection, the server sends a short workflow brief through MCP initialization. Call `get_started` for the same guidance, workflow entry points and local configuration. The MCP tool list documents exact parameters, including optional live tools when configured.
 
