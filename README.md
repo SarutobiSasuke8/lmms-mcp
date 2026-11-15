@@ -168,6 +168,10 @@ Use `export_one_shots` to process up to 32 mono or stereo 48 kHz, 16-bit PCM WAV
 
 A sampler track that plays a workspace WAV stores its absolute path. Use LMMS to relink the source if you move the project to a different machine. Stock samples are stored by their library path and move with any LMMS installation.
 
+## Visual Mix Desk
+
+Start the local sound library server and open `/mix-desk/`, or choose **Add to desk** on a playable row in a rebuilt library page. The browser desk mixes 8 channels, resamples or records loops, and saves takes and tagged mixes into the same workspace. See [Mix Desk controls](docs/mix-desk.md).
+
 ## Fathom Atelier
 
 Set `LMMS_FATHOM_WORKLET` to the absolute path of a trusted Fathom Atelier checkout's `public/worklets/synth-processor.js` before launching the MCP. The LMMS MCP package ships the adapter. The synth engine is supplied locally. Use `list_instruments` to check configuration and discover the stock plugin and preset inventory. The inventory checks files on disk. Third-party plugins loaded inside hosts such as Carla or VeSTige need their own inventory.
