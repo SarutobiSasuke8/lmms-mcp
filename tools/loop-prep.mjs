@@ -656,7 +656,7 @@ export function register({ tool, z, root, schemas, render, moduleGuidance }) {
         ...(seamInfo.method === 'cut' ? ['the seam is a plain cut'] : []),
         ...(seamInfo.method === 'fold' && !seamInfo.foldedSeconds ? ['nothing was folded, so the seam is a plain cut'] : []),
         ...(chosen.seamScore < lowSeamScore ? [`the seam score is ${chosen.seamScore}, under ${lowSeamScore}`] : []),
-        ...(jump !== null && jump > -30 ? [`the first and last samples differ by ${jump} dBFS`] : []),
+        ...(dsp.loopJoinClicks(loopReport.loop) ? [`the first and last samples differ by ${jump} dBFS`] : []),
         ...(unsure ? ['find_loop_points asked for a person to pick and acceptLowConfidence overrode it'] : []),
       ];
       const manifest = { name, source: file, sampleRate, channels: loop.channels.length,
