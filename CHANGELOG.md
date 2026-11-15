@@ -8,6 +8,9 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 - Add `list_personas` and `describe_persona`, plus an optional persona on `compose_piece`, `compose_batch` and `lmms-compose`.
 
+- Four film and game score personas: `action-score`, `horror-suspense`, `epic-fantasy` and `dark-synth-scifi`, described by sound only. The three orchestral ones name the CC0 VSCO 2 CE library by id with `articulations` keyswitch maps; `licences.json` records its source, author, licence and hashes and nothing from it is bundled. Live keyswitching waits for the SFZ keyswitch fix.
+- `scripts/personas/persona-demo.mjs` builds a reference cue for each film persona from a seed, renders it with stock LMMS voices or sampled instruments, and reports measured loudness, silences, onsets, pitch-class and spectral checks. Skips cleanly without LMMS, Decent Sampler or the library. See [docs/film-personas.md](docs/film-personas.md).
+
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `convert_sfz` applies controller modulation at the default values (`*_onccN` for envelopes, volume, pan, tuning, offset and velocity tracking) with the standard SFZ curves, so the Salamander Grand gets its intended 73% velocity tracking and 1 second release. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends.
 
