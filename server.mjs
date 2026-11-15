@@ -14,6 +14,7 @@ import { deflateSync, gunzipSync, inflateSync } from 'node:zlib';
 import midiPackage from '@tonejs/midi';
 import { createConnection } from 'node:net';
 import { renderFathom } from './fathom.mjs';
+import { generationStore } from './tools/generations.mjs';
 import { composerProfiles, composeProfile, describeProfile } from './composers.mjs';
 import { fathomPatches, searchSounds, measureInstrument } from './catalogue.mjs';
 import * as dsp from './audio.mjs';
@@ -248,13 +249,37 @@ function addTrack(parent, item) {
   for (const part of item.patterns) addPattern(target, part);
   return instrumentTrack;
 }
+const generations = generationStore(root, {
+  async measure(file) {
+    const audio = dsp.decodeWav(await readFile(file));
+    return {
+      durationSeconds: audio.frames / audio.sampleRate,
+      integratedLufs: dsp.loudness(audio).integratedLufs,
+      truePeakDbfs: dsp.db(dsp.truePeak(audio)),
+    };
+  },
+  async describeProject(name) {
+    const doc = await load(name);
+    const instruments = Array.from(doc.getElementsByTagName('instrument')).map(node => node.getAttribute('name')).filter(Boolean);
+    const plugins = Array.from(doc.getElementsByTagName('effect')).map(node => node.getAttribute('name')).filter(Boolean);
+    return { bpm: songInfo(doc).bpm, instruments, plugins };
+  },
+});
+
 const imagesKey = Symbol('images');
 const explain = error => error?.issues ? error.issues.map(issue => [issue.path.join('.'), issue.message].filter(Boolean).join(': ')).join('; ') : error.message;
 function tool(name, description, inputSchema, handler) {
   server.registerTool(name, { description, inputSchema }, async args => {
     try {
       const result = await handler(args);
-      const content = [{ type: 'text', text: JSON.stringify(result) }];
+      let catalogue = {};
+      try {
+        const ids = await generations.record(name, args, result);
+        if (ids.length) catalogue = { generationIds: ids };
+      } catch (error) {
+        catalogue = { catalogueWarning: 'Output was written, but catalogue recording failed: ' + explain(error) };
+      }
+      const content = [{ type: 'text', text: JSON.stringify(Object.keys(catalogue).length ? { ...result, ...catalogue } : result) }];
       for (const png of result?.[imagesKey] ?? []) content.push({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
       return { content };
     } catch (error) {
@@ -1558,7 +1583,7 @@ edit('set_track_role', 'Declare what an instrument track is for: drums, bass, ha
 // ---------- feature modules ----------
 // Every .mjs file in tools/ exports register(context) and adds its own tools and edits. See tools/README.md.
 const toolContext = {
-  tool, edit, edits, z, dsp, root, imagesKey, explain, moduleGuidance, postSave, exportChecks,
+  tool, edit, edits, z, dsp, root, generations, imagesKey, explain, moduleGuidance, postSave, exportChecks,
   schemas: { projectName, wavName, audioOut, workspaceWav, factorySample, folderName, pattern, track, note, volume, presetFile,
     loudnessTarget, ceilingTarget, tailMode, section, pngName },
   project: { load, save, parse, tracks, container, children, elements, add, songInfo, setAnchor, isAnchor, isControl, instrumentOf,

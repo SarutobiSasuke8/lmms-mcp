@@ -37,6 +37,7 @@
     "music.mjs",
     "effects.mjs",
     "tools/",
+    "schema/",
     "!tools/*.test.mjs",
     "sound-catalogue.json",
     "skills/",
