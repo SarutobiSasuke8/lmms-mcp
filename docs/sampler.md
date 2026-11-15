@@ -4,7 +4,7 @@ Stock LMMS has synths and a few drum samples. This route plays open SFZ sample l
 
 ## Setup
 
-1. Run `setup-vst3-windows.ps1` (see the README) for the Decent Sampler plug-in and the isolated Python host. Set `LMMS_VST3_PYTHON` and `LMMS_DECENT_SAMPLER_VST3` from the `mcp-env.json` it writes.
+1. Run `setup-vst3-windows.ps1` (or `setup-vst3-linux.sh` on Linux; see the README and [linux-real-instruments.md](linux-real-instruments.md)) for the Decent Sampler plug-in and the isolated Python host. Set `LMMS_VST3_PYTHON` and `LMMS_DECENT_SAMPLER_VST3` from the `mcp-env.json` it writes.
 2. Run `setup-libraries-windows.ps1`. It fetches four open libraries with git sparse checkout, about 1.1 GB, most of it the piano. Use `-Only` to take some of them and `-Destination` to choose the folder.
 3. Set `LMMS_SAMPLE_LIBRARIES` to that folder and restart the MCP client.
 
@@ -39,7 +39,8 @@ Give each track its own `dspreset`. A render loads every instrument in turn and 
 ## Tips
 
 - **Pitch.** Written notes sound at pitch for these libraries. Check a stem with `analyze_audio` and `pitch: true`.
-- **Drums.** The Virtuosity key map is kick 36, snare 38, pedal hat 44, closed hat 42, ride 51, crash 49. Drum samples ring on, so give ride and crash notes a long length.
+- **Drums.** The Virtuosity key map is kick 36, snare 38, pedal hat 44, closed hat 42, ride 51, crash 49. Drum samples ring on, so give ride and crash notes a long length. LMMS exports drum tracks at note 69, so give each drum track a `noteMap` such as `{"*": 36}` for the kick.
+- **Range.** `transpose` moves a part into the instrument's range, and `warnings` in the result lists notes that fall outside the preset's keys.
 - **Level.** Sampled instruments are much louder than the synth presets and differ from each other by 10 dB or more. Balance by measuring each stem, then master with `render_mix` and `targetLufs`.
 - **Mixing.** `render_vst3_stems` returns stems and a mix. For reverb and mastering, place the mix on a sample track and use the LMMS effects and `render_mix`.
 
@@ -56,7 +57,7 @@ The state layout comes from Decent Sampler 1.42.1. A different version may chang
 
 ## Limits
 
-- Windows x64 is the tested platform.
+- Windows x64 is the tested platform. Linux x86_64 is supported with the changes in [linux-real-instruments.md](linux-real-instruments.md); the state-load fix was found on a Linux box, but this repository's tests for it use a fake plug-in.
 - No keyswitches, legato, vibrato, filters or effects from the SFZ. The sax plays its sustain articulation.
 - Release samples are skipped, so a piano has no key-off noise or pedal sounds.
 - A `.dspreset` points at the library's files. Move the library and convert again.

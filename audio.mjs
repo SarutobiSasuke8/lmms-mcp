@@ -377,6 +377,24 @@ export function limit(audio, ceilingDb = -1, { wrap = false } = {}) {
   return { audio, limitedSamples: reduced, maxReductionDb: Number((20 * Math.log10(lowest)).toFixed(2)) };
 }
 
+// Limit so that the 4x oversampled true peak, not just the sample peak, stays under the ceiling.
+// A sample-peak limiter at -1 dB leaves inter-sample peaks near -0.3 dBTP. Each pass lowers the sample ceiling by the overshoot.
+export function limitTruePeak(audio, ceilingDb = -1, { wrap = false, passes = 4 } = {}) {
+  const tolerance = 0.005; // dB
+  let sampleCeiling = ceilingDb;
+  let result = limit(audio, sampleCeiling, { wrap });
+  let truePeakDb = db(truePeak(audio));
+  let limitedSamples = result.limitedSamples, maxReductionDb = result.maxReductionDb;
+  for (let pass = 0; pass < passes && truePeakDb !== null && truePeakDb > ceilingDb + tolerance; pass++) {
+    sampleCeiling -= truePeakDb - ceilingDb + 0.01;
+    result = limit(audio, sampleCeiling, { wrap });
+    limitedSamples = Math.max(limitedSamples, result.limitedSamples);
+    maxReductionDb = Math.min(maxReductionDb, result.maxReductionDb);
+    truePeakDb = db(truePeak(audio));
+  }
+  return { audio, limitedSamples, maxReductionDb, truePeakDb, sampleCeilingDb: Number(sampleCeiling.toFixed(2)) };
+}
+
 // --- spectrogram PNG ---
 const crcTable = Uint32Array.from({ length: 256 }, (_, n) => {
   let c = n;
