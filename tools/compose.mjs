@@ -140,6 +140,7 @@ export function writeDrums({ bars, style = 'rock', seed = 1, phraseBars = 4, pla
 const kit = { kick: { voice: 'kick', volume: 62 }, snare: { voice: 'clap', volume: 44 }, hat: { voice: 'hat', volume: 26 }, crash: { voice: 'sample', factorySample: 'drums/crash01.ogg', volume: 24 } };
 const acoustic = { kick: { voice: 'sample', factorySample: 'drums/bassdrum_acoustic01.ogg', volume: 58 }, snare: { voice: 'sample', factorySample: 'drums/snare_acoustic01.ogg', volume: 44 },
   hat: { voice: 'sample', factorySample: 'drums/hihat_closed01.ogg', volume: 24 }, crash: { voice: 'sample', factorySample: 'drums/crash01.ogg', volume: 22 } };
+// Styles as data: see tools/styles.json for the canonical form.
 export const styles = {
   chiptune: { about: 'Bright 8-bit style tune with a square lead, fast arpeggios and a tight beat.', bpm: 140, keys: ['C major', 'G major', 'A minor', 'E minor', 'D major'],
     melody: { style: 'driving', low: 69, high: 91, baseVelocity: 84, ornament: false }, harmony: { style: 'flowing', low: 48, high: 67, pedal: false, baseVelocity: 62 }, bass: 'octaves', drums: 'chip',
