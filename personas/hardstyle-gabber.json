@@ -1,0 +1,9 @@
+{
+  "id": "hardstyle-gabber",
+  "bpm": { "min": 150, "max": 180, "default": 150 },
+  "description": "Distorted pitched kick is the bass, reverse-bass offbeat, screech or raw lead.",
+  "subfeel": ["hardstyle", "gabber"],
+  "arrangement": "techno",
+  "groove": "straight-techno",
+  "notes": "Kick is pitched and distorted."
+}
