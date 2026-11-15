@@ -1,0 +1,8 @@
+{
+  "id": "uk-garage",
+  "bpm": { "min": 130, "max": 136, "default": 132 },
+  "description": "Skippy 2-step, 60-66% 16th shuffle, organ or warp bass, chopped vocals (user or CC0 only).",
+  "arrangement": "ukg",
+  "groove": "ukg-shuffle",
+  "notes": "Shuffles and skips rather than a straight 4/4."
+}

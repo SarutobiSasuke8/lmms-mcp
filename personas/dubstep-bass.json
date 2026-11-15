@@ -1,0 +1,8 @@
+{
+  "id": "dubstep-bass",
+  "bpm": { "min": 140, "max": 140, "default": 140 },
+  "description": "Half-time. Snare on 3, sparse kick, tempo-synced LFO wobble or growl, mid-range grind over a clean sub.",
+  "arrangement": "dnb",
+  "groove": "half-time",
+  "notes": "Half-time at 140 with a moving wobble, not a 4/4 house kick."
+}
