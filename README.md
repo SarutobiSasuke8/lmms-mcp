@@ -26,6 +26,11 @@ On connection, the server sends a short workflow brief through MCP initializatio
 
 Stem, layer and full-song renders can take a minute or more. Give your MCP client a tool timeout of at least five minutes.
 
+
+## Drum kits
+
+Stock LMMS drum samples are grouped into ready kits, including dance-oriented ones (house, techno, trance, breaks). Call `list_drum_kits` to see which pieces are present on this machine, then `create_drum_kit` to start a project with separate tracks (kick, snare, hat, openhat, clap) ready for patterns. You can also pass the returned `factorySample` paths into `create_project` yourself.
+
 ## Tools
 
 The saved-project tools work with stock LMMS. Claude's game-audio suite added chord, melody and drum-grid inputs, measured sound search, batch edits, mixer processing, audio analysis and adaptive game exports. Optional components extend the same project workflow with Fathom synthesis, VST3 stems and live controls.
