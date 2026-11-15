@@ -46,6 +46,7 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Scores and performance | `import_midi`, `shape_performance`, `master_audio` ([docs/midi-import.md](docs/midi-import.md)) |
 | Phrase library | `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase`, `rate_phrase` ([docs/phrases.md](docs/phrases.md)) |
 | Browse sounds | `build_library_page`, `build_library_previews` |
+| See a song | `build_timeline_page` ([docs/timeline.md](docs/timeline.md)) |
 | Check | `set_track_role`, `lint_arrangement`, `quality_report` ([docs/arranger-lint.md](docs/arranger-lint.md)) |
 | Balance | `auto_balance`, `compare_to_reference` ([docs/balance.md](docs/balance.md)) |
 | Loops | `find_loop_points`, `prepare_loop` ([docs/loop-prep.md](docs/loop-prep.md)) |

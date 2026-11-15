@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `build_timeline_page`: one HTML page that shows a song as a DAW would, with each stem as a lane under a bar ruler, sections and DJ effects as blocks, synced playback with mute and solo, section looping, and notes pinned to bars that can be copied back. The library page links each track to its timeline.
 - `import_midi`: a standard MIDI file becomes an editable LMMS project, with its time signature and tempo, sustain pedal baked into note lengths, volume changes folded into velocities, merged tracks and `form` to unfold repeats.
 - `shape_performance`: phrase dynamics, melody voicing, metric accents, ritardando at phrase ends and the final bars, a simulated sustain pedal, melody lead and seeded variation. Also a step for `apply_edits`.
 - `master_audio`: trim, fade and master any workspace WAV to a loudness target.
