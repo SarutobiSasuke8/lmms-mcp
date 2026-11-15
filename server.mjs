@@ -309,7 +309,7 @@ tool('list_external_tools', 'Discover optional renderer dependencies, VST3 instr
       { name: 'FFmpeg', use: 'OGG export', env: 'LMMS_FFMPEG', url: 'https://ffmpeg.org/download.html' },
       { name: 'Fathom Synth', use: 'Optional synth worklet', env: 'LMMS_FATHOM_WORKLET' },
       { name: 'LMMS Agent Bridge', use: 'Optional live editing on Windows', env: 'LMMS_LIVE_PIPE', url: 'https://github.com/Jx9x/lmms-mcp-bridge' },
-      { name: 'FluidSynth', use: 'Standalone SF2/SF3 MIDI render; manual companion workflow', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
+      { name: 'FluidSynth', use: 'SF2/SF3 MIDI render via render_soundfont. Set LMMS_FLUIDSYNTH or have fluidsynth on PATH. See docs/soundfont.md.', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
     ],
     setup: 'On Windows x64 with Python 3.12, run setup-vst3-windows.ps1 from the package. See the README for manual setup.' };
 });
@@ -705,6 +705,7 @@ tool('list_presets', 'List installed factory presets: native .xpf paths, plus Zy
 
 // ---------- rendering ----------
 const renderLimit = Number(process.env.LMMS_RENDER_TIMEOUT_SECONDS) || null;
+const nightlyDeadline = Number(process.env.LMMS_NIGHTLY_DEADLINE_MS) || null;
 function forRender(doc) {
   const copy = parse(xml.serializeToString(doc));
   const list = tracks(copy);
@@ -730,10 +731,14 @@ async function renderDoc(doc, { loop = true, prepared = false } = {}) {
   try {
     const project = path.join(temp, 'render.mmp'), rendered = path.join(temp, 'render.wav');
     await writeFile(project, xml.serializeToString(copy));
+    const remaining = nightlyDeadline === null ? Infinity : nightlyDeadline - Date.now();
+    if (remaining <= 0) throw new Error('Recipe time budget exceeded');
+    const timeout = Math.min(seconds * 1000, remaining);
     try {
       await run(lmms, ['render', project, '-s', '48000', '-f', 'wav', ...(loop ? ['-l'] : []), '-o', rendered],
-        { cwd: root, timeout: seconds * 1000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+        { cwd: root, timeout, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     } catch (error) {
+      if (error.killed && timeout === remaining) throw new Error('Recipe time budget exceeded');
       if (error.killed) throw new Error(`LMMS did not finish rendering within ${seconds} seconds. Set LMMS_RENDER_TIMEOUT_SECONDS to allow longer.`);
       throw new Error(error.code === 'ENOENT' ? `LMMS was not found at ${lmms}. Set LMMS_EXECUTABLE.` : 'LMMS render failed: ' + String(error.message).split('\n')[0]);
     }
