@@ -7,6 +7,12 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Added
 
 - `build_timeline_page`: one HTML page that shows a song as a DAW would, with each stem as a lane under a bar ruler, sections and DJ effects as blocks, synced playback with mute and solo, section looping, and notes pinned to bars that can be copied back. The library page links each track to its timeline.
+- `tag_sound` and `list_tagged`: metadata for workspace sounds and finished pieces (title, composer, era, genre, mood, game use, arrangement, instrumentation, length, loop, source, licence, credits, date) kept in a `<name>.meta.json` sidecar shared by every format of the same name, checked on write and searchable by any field. See [docs/sound-library.md](docs/sound-library.md).
+
+### Changed
+
+- `build_library_page` lists tagged renders as finished pieces, adds filters for composer, era, genre, mood, game use, arrangement and licence, shows credits, the source link and the `<name>.source.md` note, and reads the length of OGG renders. Pages with no metadata are unchanged.
+- `library-server.mjs` serves `.md` files as text.
 
 ## 0.9.0 - 2026-11-15
 

@@ -8,7 +8,7 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
-const types = { '.html': 'text/html; charset=utf-8', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.mp3': 'audio/mpeg', '.png': 'image/png', '.json': 'application/json', '.js': 'text/javascript', '.css': 'text/css' };
+const types = { '.html': 'text/html; charset=utf-8', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.mp3': 'audio/mpeg', '.png': 'image/png', '.json': 'application/json', '.js': 'text/javascript', '.css': 'text/css', '.md': 'text/markdown; charset=utf-8' };
 const defaultSamples = process.platform === 'win32' ? 'C:/Program Files/LMMS/data/samples' : '/usr/share/lmms/samples';
 export function mounts(env = process.env) {
   return {
