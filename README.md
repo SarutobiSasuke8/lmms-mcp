@@ -194,6 +194,11 @@ The bridge uses the written pitches, note lengths and velocities. It interpolate
 
 `search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
 
+
+## SoundFonts
+
+`render_soundfont` renders a workspace MIDI file through a `.sf2` or `.sf3` using FluidSynth. Set `LMMS_FLUIDSYNTH` (or have `fluidsynth` on PATH) and optionally `LMMS_SOUNDFONTS`. See `docs/soundfont.md`.
+
 ## External VST3 instruments
 
 ### Companion tool coverage
