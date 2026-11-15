@@ -1,0 +1,8 @@
+{
+  "id": "detroit-berlin-techno",
+  "bpm": { "min": 125, "max": 140, "default": 132 },
+  "description": "Rumble kick, hypnotic loops, long filter and decay automation, optional acid, functional arrangement.",
+  "arrangement": "techno",
+  "groove": "straight-techno",
+  "notes": "Hypnotic and dry. Little fill-for-fill's-sake."
+}

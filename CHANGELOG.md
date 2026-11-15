@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- DJ persona pack A (club): dutch-trance, french-filter-house, carnival-party-house, chicago-acid, detroit-berlin-techno. JSON files in `personas/` ready for the persona loader.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
 - Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
