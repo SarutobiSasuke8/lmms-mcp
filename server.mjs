@@ -56,7 +56,7 @@ async function runChecks(list, doc, project, strict) {
   return { arrangement };
 }
 const strictChecks = z.boolean().default(false).describe('Stop with an error, writing nothing, when an arrangement check reports an error.');
-const server = new McpServer({ name: 'lmms-project-tools', version: '0.8.1' }, { instructions });
+const server = new McpServer({ name: 'lmms-project-tools', version: '0.9.0' }, { instructions });
 const projectName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mmpz?$/i);
 const compressed = name => name.toLowerCase().endsWith('.mmpz');
 const maxProjectBytes = 32 * 1024 * 1024;
@@ -313,10 +313,10 @@ tool('list_external_tools', 'Discover optional renderer dependencies, VST3 instr
     ],
     setup: 'On Windows x64 with Python 3.12, run setup-vst3-windows.ps1 from the package. See the README for manual setup.' };
 });
-tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments. Return aligned stereo WAVs, a mix and a reproducible assignment manifest.', {
+tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments, up to 10 minutes, with an optional reverb per track. Return aligned stereo WAVs, a mix and a reproducible assignment manifest. Leave a few seconds after the last note for the release and reverb tail.', {
   midi: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
   outputDirectory: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/i),
-  durationSeconds: z.number().min(0.1).max(120),
+  durationSeconds: z.number().min(0.1).max(600),
   tracks: z.array(z.object({
     track: z.string().min(1).max(100),
     name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
@@ -326,6 +326,16 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
       .describe('A Decent Sampler preset in the workspace, for example from convert_sfz. Use instead of preset; instrument must be decent-sampler.'),
     parameters: z.record(z.string().max(120), z.number().min(0).max(1)).default({}),
     gainDb: z.number().min(-60).max(12).default(0),
+    width: z.number().min(0).max(1.5).default(1).describe("Stereo width of the instrument before the reverb: 0 is mono, 1 unchanged. Wide sampled pianos often need 0.5 to 0.7 to hold together in mono."),
+    eq: z.array(z.object({
+      type: z.enum(["highpass", "lowshelf", "highshelf", "peak"]), hz: z.number().min(20).max(20000),
+      db: z.number().min(-18).max(18).default(0), q: z.number().min(0.1).max(10).default(0.7),
+    })).max(6).default([]).describe("EQ after the instrument, before the reverb. For example a highshelf at 3500 Hz +3 dB to brighten a soft piano."),
+    reverb: z.object({
+      wet: z.number().min(0).max(1).default(0.22), roomSize: z.number().min(0).max(1).default(0.7),
+      damping: z.number().min(0).max(1).default(0.5), width: z.number().min(0).max(1).default(1),
+      preDelayMs: z.number().min(0).max(200).default(20),
+    }).optional().describe("Add a room to this track after the instrument, for example { wet: 0.22, roomSize: 0.75 } for a piano in a hall. The stem keeps its reverb, so the stems still sum to the mix."),
   })).min(1).max(8),
 }, async ({ midi, outputDirectory, durationSeconds, tracks }) => {
   const python = process.env.LMMS_VST3_PYTHON;

@@ -214,16 +214,17 @@ const patterns = {
   flowing: { step: 12, shape: [0, 1, 2, 3, 4, 3, 2, 1, 2, 3, 4, 3, 2, 1, 2, 1] },
   broken: { step: 48, shape: [0, 2, 1, 2] },
   block: { step: 96, shape: ['chord', 'chord'] },
+  held: { step: 192, shape: ['chord'] }, // one chord a bar, for backing a solo
 };
 export const accompanimentStyles = Object.keys(patterns);
-export function writeAccompaniment({ chords, bars, seed = 1, low = 36, high = 67, style = 'arpeggio', baseVelocity = 56, dynamics = 1, pedal = true, plan: melodyPlan = [] } = {}) {
+export function writeAccompaniment({ chords, bars, seed = 1, low = 36, high = 67, style = 'arpeggio', baseVelocity = 56, dynamics = 1, pedal = true, plan: melodyPlan = [], final: endsPiece = true } = {}) {
   if (!patterns[style]) throw new Error(`Unknown style "${style}". Use one of: ${accompanimentStyles.join(', ')}`);
   const plan = chordPlan(chords, bars), random = rng(seed + 7919), { step, shape } = patterns[style];
   const liftAt = bar => melodyPlan.find(p => bar >= p.bar && bar < p.bar + p.bars)?.liftDegrees ?? 0;
   const notes = [];
   let lastRoot = low + 8;
   for (let bar = 0; bar < bars; bar++) {
-    const span = BAR / plan[bar].length, final = bar === bars - 1;
+    const span = BAR / plan[bar].length, final = endsPiece && bar === bars - 1;
     plan[bar].forEach((chord, part) => {
       const from = bar * BAR + part * span;
       let root = low; // the chord root nearest the last one, kept in the bottom octave and a half
@@ -235,9 +236,9 @@ export function writeAccompaniment({ chords, bars, seed = 1, low = 36, high = 67
       const ladder = [root, root + 7, root + 12, root + 12 + mod(third - chord.root, 12), colour === undefined ? root + 19 : root + 12 + mod(colour - chord.root, 12) + (mod(colour - chord.root, 12) < 5 ? 12 : 0)]
         .map(m => m > high ? m - 12 : m);
       const swell = dynamics * liftAt(bar) * 2;
-      if (final || style === 'block') {
-        const hits = final ? [0] : [0, 96].filter(t => t < span);
-        for (const t of hits) for (const m of [ladder[0], ladder[1], ladder[2], ladder[3]]) notes.push({ tick: from + t, length: (final ? span : Math.min(96, span - t)) - 4, midi: m, velocity: Math.round(clamp(baseVelocity + swell + (t ? -6 : 2) - (final ? 4 : 0) + random.spread(2), 1, 127)) });
+      if (final || style === 'block' || style === 'held') {
+        const hits = final || style === 'held' ? [0] : [0, 96].filter(t => t < span);
+        for (const t of hits) for (const m of [ladder[0], ladder[1], ladder[2], ladder[3]]) notes.push({ tick: from + t, length: (final || style === 'held' ? span : Math.min(96, span - t)) - 4, midi: m, velocity: Math.round(clamp(baseVelocity + swell + (t ? -6 : 2) - (final ? 4 : 0) + random.spread(2), 1, 127)) });
         return;
       }
       for (let t = 0, i = 0; t < span; t += step, i++) {

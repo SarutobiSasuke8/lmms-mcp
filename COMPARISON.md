@@ -68,3 +68,32 @@ Two more public repositories exist and were set aside: one is a self-described s
 Where others are ahead, as documented: struktured-labs has SoundFont tools, sung or hummed audio to notes, project versioning, automation helpers and CI. ZipseLu covers more LMMS instruments and effect types, including VST through VeSTige and LMMS 1.3 instruments. Jx9x controls a running session natively. This server has no SoundFont tracks, no CI and no macOS or Linux test pass yet.
 
 Not confirmed by reading: Jx9x's full tool count and effect parameter depth, struktured-labs' reverb and delay parameter names, and whether any project's tests pass.
+
+## Refresh, 15 November 2026: main after the composing, solo, DJ and library work
+
+Source: `main` at `67994ac` (npm 0.8.1 plus the unreleased changes in the changelog). Our column comes from running the code: `npm test` passed 188 of 188 and the server started over stdio and listed **76 tools**. CI runs on Windows and Linux with a separate LMMS render job, so the "no CI yet" line in the v0.7.0 table is out of date. The competitor columns are still reading, not running. We re-checked the three repositories on this date: ZipseLu's last commit is `e57d9fe` (21 August), Jx9x's is `5e6f57b` (23 October) and struktured-labs' is from 18 January. None has moved since the v0.7.0 survey, so those cells stand. A fourth repository, hamilto8/lmms_mcp, is empty.
+
+What was added since v0.7.0, and what none of the three others documents:
+
+| Capability | This server (main) | Others, as documented |
+| --- | --- | --- |
+| Whole pieces from a seed | `compose_piece` and `compose_batch` write chords, melody, harmony, bass, drums, intro and ending in five styles, render, and rank by measured checks. `lmms-compose` does the same with no agent | None listed |
+| Melody and solo writing | `write_melody` (one recurring idea, breaths, one climax), `write_accompaniment`, `write_solo`, `develop_motif` | ZipseLu has a scale generator. struktured-labs has chord and drum-string input. No phrase-level writer listed |
+| Composer profiles | `list_composer_profiles` and `create_composer_sketch` start a piece from a named technique (Grieg, Satie, Debussy, Bach and others) | None listed |
+| Phrase library | 68 key-agnostic phrases, with listener ratings and a use history | None listed |
+| Checks that gate a result | `lint_arrangement`, `quality_report`, `auto_balance` and `compare_to_reference` set and judge levels by measurement | struktured-labs has spectrum and pitch readback only |
+| Game delivery | `export_game_audio` (intro, loop, layers, stingers, manifest), `find_loop_points`, `prepare_loop` | OGG or bar-range render at best |
+| DJ processing | `dj_effects` and `rearrange_audio` on a rendered WAV | None listed |
+| Listener loop | `build_audition_page`, `read_feedback`, `remember_taste`, `get_taste` | None listed |
+| Sound browsing | `build_library_page` and `build_library_previews`: one page of every preset, sample and phrase with audio previews | List and search tools only |
+| Sampled instruments | `convert_sfz` and `render_vst3_stems` through Decent Sampler and Surge XT (Windows x64 only) | ZipseLu documents VeSTige and VST. struktured-labs has SoundFont tools |
+
+### Where the claim is weaker than the table
+
+- **No musical-quality evidence yet.** We measure loudness, balance, loop seams and structure. We have not run a blind comparison of composer-profile output against a plain prompt, so "better music" is not claimed. The audition page exists to collect that evidence.
+- **Notation is phrase and line notation only.** The server reads its own `NOTE:steps` lines and phrase notation. It does not read or write MusicXML, ABC or LilyPond.
+- **Narrow platform.** Stock LMMS 1.2.2 and Node.js 22. Windows is the tested target, Linux renders in CI, and the sampler route is Windows only. There is no macOS pass.
+- **Others still lead in places.** Jx9x controls a running LMMS session natively and we depend on its bridge for that. ZipseLu covers more instruments and 18 effect types against our nine. struktured-labs has SoundFont tracks, sung or hummed audio to notes and project versioning.
+- **No public traction.** On 15 November the repositories show 5 stars (ZipseLu), 2 (struktured-labs) and 0 each for Jx9x and this one. The strongest claim the evidence supports is about documented scope and tested behaviour, not adoption.
+
+Reproduce the counts with `npm test`, and with a stdio client calling `tools/list` against `server.mjs`.

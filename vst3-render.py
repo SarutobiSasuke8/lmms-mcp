@@ -8,6 +8,29 @@ import wave
 sys.path.insert(0, str(Path(__file__).resolve().parent / "sampler"))
 
 
+def apply_eq(audio, bands, rate):
+    import numpy as np
+    from pedalboard import HighpassFilter, HighShelfFilter, LowShelfFilter, Pedalboard, PeakFilter
+    make = {"highpass": lambda b: HighpassFilter(cutoff_frequency_hz=b["hz"]),
+            "lowshelf": lambda b: LowShelfFilter(cutoff_frequency_hz=b["hz"], gain_db=b.get("db", 0), q=b.get("q", 0.7)),
+            "highshelf": lambda b: HighShelfFilter(cutoff_frequency_hz=b["hz"], gain_db=b.get("db", 0), q=b.get("q", 0.7)),
+            "peak": lambda b: PeakFilter(cutoff_frequency_hz=b["hz"], gain_db=b.get("db", 0), q=b.get("q", 0.7))}
+    return Pedalboard([make[b["type"]](b) for b in bands])(audio.astype(np.float32), rate)
+
+
+def add_reverb(audio, settings, rate):
+    """Return the dry signal plus a pre-delayed room, at the same length."""
+    import numpy as np
+    from pedalboard import Reverb
+    delay = int(round(settings.get("preDelayMs", 20) / 1000 * rate))
+    source = np.zeros_like(audio)
+    source[:, delay:] = audio[:, :audio.shape[1] - delay] if delay else audio
+    room = Reverb(room_size=settings.get("roomSize", 0.7), damping=settings.get("damping", 0.5),
+                  wet_level=1.0, dry_level=0.0, width=settings.get("width", 1.0))
+    wet = room(source.astype(np.float32), rate)
+    return (audio + wet * settings.get("wet", 0.22)).astype(np.float32)
+
+
 def main():
     if sys.argv[1] == "probe":
         print(json.dumps({name: importlib.util.find_spec(name) is not None
@@ -70,6 +93,13 @@ def main():
         audio = plugin(events, duration=frames / rate, sample_rate=rate, num_channels=2, buffer_size=512)
         if audio.shape != (2, frames) or not np.isfinite(audio).all() or np.max(np.abs(audio)) < 0.0001:
             raise ValueError(f'{assignment["track"]} produced invalid or silent audio')
+        if assignment.get("width", 1) != 1:
+            mid, side = (audio[0] + audio[1]) / 2, (audio[0] - audio[1]) / 2 * assignment["width"]
+            audio = np.stack([mid + side, mid - side]).astype(np.float32)
+        if assignment.get("eq"):
+            audio = apply_eq(audio, assignment["eq"], rate)
+        if assignment.get("reverb"):
+            audio = add_reverb(audio, assignment["reverb"], rate)
         audio *= 10 ** (assignment["gainDb"] / 20)
         mix += audio
         stems.append((assignment["name"] + ".wav", audio))
