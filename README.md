@@ -42,7 +42,7 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Write tunes | `write_melody`, `write_accompaniment` ([docs/melody.md](docs/melody.md)) |
 | Whole pieces | `compose_piece`, `compose_batch`, and `lmms-compose` on the command line with no agent ([docs/compose.md](docs/compose.md)) |
 | Solo lines | `write_solo` |
-| DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio` |
+| DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio`, `time_stretch`, `chop_break` ([break editing](docs/break-edits.md)) |
 | Scores and performance | `import_midi`, `shape_performance`, `master_audio` ([docs/midi-import.md](docs/midi-import.md)) |
 | Phrase library | `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase`, `rate_phrase` ([docs/phrases.md](docs/phrases.md)) |
 | Browse sounds | `build_library_page`, `build_library_previews`, `tag_sound`, `list_tagged` ([docs/sound-library.md](docs/sound-library.md)) |
