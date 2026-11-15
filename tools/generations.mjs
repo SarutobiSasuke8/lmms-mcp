@@ -80,6 +80,9 @@ export function generationStore(workspace, { measure, describeProject } = {}) {
       if (record.event === 'rating') {
         const previous = index.get(record.id);
         if (previous) index.set(record.id, { ...previous, rating: record.rating, feedback: record.feedback });
+      } else if (record.event === 'location') {
+        const previous = index.get(record.id);
+        if (previous) index.set(record.id, { ...previous, locations: { ...previous.locations, [record.target]: record.location } });
       } else if (!index.has(record.id)) {
         index.set(record.id, record);
       }
@@ -174,6 +177,14 @@ export function generationStore(workspace, { measure, describeProject } = {}) {
         const note = feedback === undefined ? entry.feedback : feedback;
         await append({ event: 'rating', id, rating, feedback: note, created: new Date().toISOString() });
         return { ...entry, rating, feedback: note };
+      });
+    },
+    async setLocation(id, target, location) {
+      if (!['r2', 'hf'].includes(target)) throw new Error('Unknown location target');
+      return serial(async () => {
+        const entry = await this.show(id);
+        await append({ event: 'location', id, target, location, created: new Date().toISOString() });
+        return { ...entry, locations: { ...entry.locations, [target]: location } };
       });
     },
     async backfill(directory, sources, game) {

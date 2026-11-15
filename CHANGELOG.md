@@ -7,6 +7,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Added
 
 - Render, compose, master and export tools now record generation manifests in a local catalogue with SHA-256 deduplication, rating, and licence provenance.
+- `publish_to_r2` promotes an approved catalogued generation to a private Cloudflare R2 bucket as immutable versioned keys (`games/<game>/<kind>/<slug>/v<N>.<ext>`) with a manifest that carries the credits, and keeps `games/<game>/index.json` for games to load. It is a dry run until `confirm: true`, never overwrites a versioned object, refuses unknown licences and missing credits, and saves the R2 location in the catalogue. `list_r2_assets` lists the bucket read only. Configuration comes from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET`. See [docs/r2.md](docs/r2.md).
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `convert_sfz` applies controller modulation at the default values (`*_onccN` for envelopes, volume, pan, tuning, offset and velocity tracking) with the standard SFZ curves, so the Salamander Grand gets its intended 73% velocity tracking and 1 second release. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends.

@@ -41,6 +41,7 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Start fast | `list_blueprints`, `create_from_blueprint`, `develop_motif` ([docs/blueprints.md](docs/blueprints.md)) |
 | Write tunes | `write_melody`, `write_accompaniment` ([docs/melody.md](docs/melody.md)) |
 | Local generation catalogue | Search, rate and backfill render and composition manifests ([docs/catalogue.md](docs/catalogue.md)) |
+| Publish approved generations to R2 | `publish_to_r2` (dry run by default), `list_r2_assets` ([docs/r2.md](docs/r2.md)) |
 | Whole pieces | `compose_piece`, `compose_batch`, and `lmms-compose` on the command line with no agent ([docs/compose.md](docs/compose.md)) |
 | Solo lines | `write_solo` |
 | DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio` |
