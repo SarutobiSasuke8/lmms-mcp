@@ -1,0 +1,9 @@
+{
+  "id": "drum-and-bass",
+  "bpm": { "min": 170, "max": 176, "default": 174 },
+  "description": "Two-step kick, snares on 2 and 4, ghost snares, reese or neuro growl, programmed amen-style edits (never a famous break).",
+  "subfeel": ["liquid", "neuro", "roller"],
+  "arrangement": "dnb",
+  "groove": "straight-techno",
+  "notes": "170s, two-step kick, no sampled famous break."
+}

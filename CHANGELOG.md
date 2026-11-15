@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- DJ persona pack B (bass and hard): drum-and-bass, uk-garage, dubstep-bass, hardstyle-gabber, cinematic-psytrance. JSON files in `personas/`.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
 - Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
