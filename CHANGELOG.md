@@ -18,6 +18,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Fixed
 
+- Loops that start with a drum hit are no longer flagged as clicking at the loop join. `analyze` reports `loop.boundaryStepDbfs`, and the warning fires only when the join jumps more than 6 dB above the step between neighbouring samples.
 - VST3 stem rendering aligns one-frame rounding differences to the requested length and reports malformed or silent output separately.
 
 ## 0.9.1 - 2026-11-15
@@ -53,10 +54,6 @@ No tool changes. Every 0.9.0 tool keeps its name and its required arguments.
 ### Compatibility
 
 - Requires Node.js 20 or newer (previously documented as 22). Stock LMMS 1.2.2 on Windows x64, with Linux rendering checked in CI. The VST3 and sampler route is tested on Windows x64 only.
-
-### Fixed
-
-- Loops that start with a drum hit are no longer flagged as clicking at the loop join. `analyze` reports `loop.boundaryStepDbfs`, and the warning fires only when the join jumps more than 6 dB above the step between neighbouring samples.
 
 ## 0.9.0 - 2026-11-15
 
