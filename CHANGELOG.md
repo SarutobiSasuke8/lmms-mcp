@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `write_solo`: a solo line for one instrument over chords, split into short and long notes so a staccato and a sustained sound can play the same part.
 - `write_melody` and `write_accompaniment`: phrase-based melodies with one recurring idea, a breath after each phrase, a single climax and shaped dynamics, plus a matching backing part.
 - `compose_piece` and `compose_batch`: whole arranged pieces from a style and a seed (chords, melody, harmony, bass, drums, intro and ending), rendered and ranked by measured checks. Five starter styles: chiptune, adventure, battle, ballad, swing.
 - `lmms-compose`, a command that composes, renders and ranks pieces with no AI agent.
