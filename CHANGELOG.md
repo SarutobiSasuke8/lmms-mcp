@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `build_library_page` and `build_library_previews`: one self-contained HTML page that lists every factory preset, stock sample, workspace sound and library phrase with filters and audio previews, plus `library-server.mjs` to serve it so the browser can play files from disk.
 - `write_solo`: a solo line for one instrument over chords, split into short and long notes so a staccato and a sustained sound can play the same part.
 - `list_dj_effects`, `dj_effects` and `rearrange_audio`: DJ effects (filter sweep, phaser, flanger, beat repeat, gate, tape stop, spinback, echo out, scratch, reverse and more) applied to a rendered WAV at bar positions, and DJ-style re-ordering of a render by bar ranges.
 - `write_melody` and `write_accompaniment`: phrase-based melodies with one recurring idea, a breath after each phrase, a single climax and shaped dynamics, plus a matching backing part.

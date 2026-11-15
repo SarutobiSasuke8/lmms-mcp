@@ -1549,6 +1549,7 @@ const toolContext = {
   render: { renderDoc, renderMix, forRender, isolate, pool, parallelRenders, writeAudio, hasFfmpeg, masterAudio, barFrames, measureWav },
   music: { expandPattern, parseChord, voiceChord, bassNote, chordQualities },
   sounds: { soundFacts, listPresets, listZynPresets, effectTypes },
+  paths: { samples: samplesDirectory },
 };
 const toolModules = (await readdir(new URL('./tools/', import.meta.url)).catch(() => [])).filter(name => name.endsWith('.mjs') && !name.endsWith('.test.mjs')).sort();
 for (const file of toolModules) await (await import(new URL('./tools/' + file, import.meta.url))).register(toolContext);

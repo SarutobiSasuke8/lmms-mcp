@@ -44,6 +44,7 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Solo lines | `write_solo` |
 | DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio` |
 | Phrase library | `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase`, `rate_phrase` ([docs/phrases.md](docs/phrases.md)) |
+| Browse sounds | `build_library_page`, `build_library_previews` |
 | Check | `set_track_role`, `lint_arrangement`, `quality_report` ([docs/arranger-lint.md](docs/arranger-lint.md)) |
 | Balance | `auto_balance`, `compare_to_reference` ([docs/balance.md](docs/balance.md)) |
 | Loops | `find_loop_points`, `prepare_loop` ([docs/loop-prep.md](docs/loop-prep.md)) |
