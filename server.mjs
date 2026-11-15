@@ -309,7 +309,7 @@ tool('list_external_tools', 'Discover optional renderer dependencies, VST3 instr
       { name: 'FFmpeg', use: 'OGG export', env: 'LMMS_FFMPEG', url: 'https://ffmpeg.org/download.html' },
       { name: 'Fathom Synth', use: 'Optional synth worklet', env: 'LMMS_FATHOM_WORKLET' },
       { name: 'LMMS Agent Bridge', use: 'Optional live editing on Windows', env: 'LMMS_LIVE_PIPE', url: 'https://github.com/Jx9x/lmms-mcp-bridge' },
-      { name: 'FluidSynth', use: 'Standalone SF2/SF3 MIDI render; manual companion workflow', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
+      { name: 'FluidSynth', use: 'SF2/SF3 MIDI render via render_soundfont. Set LMMS_FLUIDSYNTH or have fluidsynth on PATH. See docs/soundfont.md.', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
     ],
     setup: 'On Windows x64 with Python 3.12, run setup-vst3-windows.ps1 from the package. See the README for manual setup.' };
 });
