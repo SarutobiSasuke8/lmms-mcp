@@ -228,12 +228,14 @@ Use the same local Atelier DSP link or `LMMS_ATELIER_DSP` setting as the grooveb
 
 The MCP package includes the VST3 adapter. Install the optional host dependencies and instruments locally to enable it. Use `list_external_tools` to see the upstream links, configured plugins and whether the selected Python has the required packages. The tool reports file presence. A render verifies whether a plugin and preset load successfully.
 
-On Windows x64 with Python 3.12 installed, run `./setup-vst3-windows.ps1` from the package or checkout. It downloads pinned portable Decent Sampler and Surge XT plug-ins from their publishers, checks their SHA-256 hashes and creates an isolated host environment. Copy the generated `mcp-env.json` entries into your MCP client's environment settings and restart the client. The default destination is `%LOCALAPPDATA%/lmms-mcp/vst3-v1`. Use `-InstallDirectory` with a new directory for a separate install or to retry a failed setup. The command leaves system plug-in folders alone and sample libraries are obtained separately.
+On Windows x64 with Python 3 installed, run `./setup-vst3-windows.ps1` from the package or checkout. It downloads pinned portable Decent Sampler and Surge XT plug-ins from their publishers, checks their SHA-256 hashes and creates an isolated host environment. Copy the generated `mcp-env.json` entries into your MCP client's environment settings and restart the client. The default destination is `%LOCALAPPDATA%/lmms-mcp/vst3-v1`. Use `-InstallDirectory` with a new directory for a separate install or to retry a failed setup. The command leaves system plug-in folders alone and sample libraries are obtained separately.
+
+On Linux x86_64, run `./setup-vst3-linux.sh`. It builds the same isolated host environment and takes each plug-in either from a download address with a mandatory SHA-256 (`DECENT_SAMPLER_URL`, `DECENT_SAMPLER_SHA256`, `SURGE_XT_URL`, `SURGE_XT_SHA256`) or from a `.vst3` folder you already have (`--decent-sampler-bundle`, `--surge-xt-bundle`). Point the settings at the `.vst3` folders, not the `.so` inside them. See [docs/linux-real-instruments.md](docs/linux-real-instruments.md).
 
 For manual setup, create an isolated Python environment and set its executable and both plugin locations in your MCP client environment:
 
 ```powershell
-py -3.12 -m venv .venv-vst3
+py -3 -m venv .venv-vst3
 .\.venv-vst3\Scripts\python.exe -m pip install pedalboard==0.9.26 mido==1.3.3
 $env:LMMS_VST3_PYTHON = (Resolve-Path .\.venv-vst3\Scripts\python.exe).Path
 $env:LMMS_DECENT_SAMPLER_VST3 = 'C:\path\to\DecentSampler.vst3\Contents\x86_64-win\DecentSampler.vst3'

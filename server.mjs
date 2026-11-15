@@ -19,12 +19,13 @@ import { fathomPatches, searchSounds, measureInstrument } from './catalogue.mjs'
 import * as dsp from './audio.mjs';
 import { expandPattern, parseChord, voiceChord, bassNote, chordQualities } from './music.mjs';
 import { effectTypes, resolveParams, describeEffects } from './effects.mjs';
+import { lmmsDataDirectory, renderTimeoutMs, vst3SetupText, noteMapKey, checkNoteMap } from './tools/vst3-linux.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(process.env.LMMS_WORKSPACE ?? process.cwd());
 const lmms = process.env.LMMS_EXECUTABLE ??
   (process.platform === 'win32' ? 'C:/Program Files/LMMS/lmms.exe' : 'lmms');
-const dataDirectory = path.join(path.dirname(lmms), 'data');
+const dataDirectory = lmmsDataDirectory(lmms);
 const presets = path.resolve(process.env.LMMS_PRESETS ?? path.join(dataDirectory, 'presets'));
 const samplesDirectory = path.resolve(process.env.LMMS_SAMPLES ?? path.join(dataDirectory, 'samples'));
 const pluginDirectory = path.resolve(process.env.LMMS_PLUGINS ?? path.join(path.dirname(lmms), 'plugins'));
@@ -311,7 +312,7 @@ tool('list_external_tools', 'Discover optional renderer dependencies, VST3 instr
       { name: 'LMMS Agent Bridge', use: 'Optional live editing on Windows', env: 'LMMS_LIVE_PIPE', url: 'https://github.com/Jx9x/lmms-mcp-bridge' },
       { name: 'FluidSynth', use: 'SF2/SF3 MIDI render via render_soundfont. Set LMMS_FLUIDSYNTH or have fluidsynth on PATH. See docs/soundfont.md.', url: 'https://github.com/FluidSynth/fluidsynth/releases' },
     ],
-    setup: 'On Windows x64 with Python 3.12, run setup-vst3-windows.ps1 from the package. See the README for manual setup.' };
+    setup: vst3SetupText() };
 });
 tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI export with configured VST3 instruments, up to 10 minutes, with an optional EQ, width, reverb and acoustic space (room, hall, church or cathedral) per track. Return aligned stereo WAVs, a mix and a reproducible assignment manifest. Leave a few seconds after the last note for the release and reverb tail.', {
   midi: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.mid$/i),
@@ -325,7 +326,13 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
     dspreset: z.string().regex(/^[a-z0-9][a-z0-9 _-]{0,99}\.dspreset$/i).optional()
       .describe('A Decent Sampler preset in the workspace, for example from convert_sfz. Use instead of preset; instrument must be decent-sampler.'),
     parameters: z.record(z.string().max(120), z.number().min(0).max(1)).default({}),
-    gainDb: z.number().min(-60).max(12).default(0),
+    gainDb: z.number().min(-60).max(36).default(0).describe('Gain in dB after the instrument, EQ and space. Quiet sampled instruments can need more than 12 dB; the shared gain still stops the mix clipping. Use normalise to level a stem without measuring it first.'),
+    normalise: z.number().min(-60).max(0).optional().describe('Bring this stem to this peak level in dBFS before gainDb is added, for example -6. It measures the stem, so it fixes instruments that differ by 10 dB or more.'),
+    noteMap: z.record(z.string().regex(noteMapKey), z.number().int().min(0).max(127)).optional()
+      .describe('Move notes to other keys before the instrument hears them. Keys are source MIDI notes, or * for every other note. Drum tracks from LMMS export at note 69, so a kick track needs { "*": 36 }, a snare { "*": 38 }, a ride { "*": 51 } and a crash { "*": 49 }.'),
+    transpose: z.number().int().min(-48).max(48).default(0).describe('Semitones to shift every note, after noteMap. Notes that fall outside the preset range are reported in warnings.'),
+    noteRange: z.tuple([z.number().int().min(0).max(127), z.number().int().min(0).max(127)]).optional()
+      .describe('The lowest and highest key the instrument plays, for the out-of-range warning. A dspreset supplies it by itself; give it for a vstpreset.'),
     width: z.number().min(0).max(1.5).default(1).describe("Stereo width of the instrument before the reverb: 0 is mono, 1 unchanged. Wide sampled pianos often need 0.5 to 0.7 to hold together in mono."),
     eq: z.array(z.object({
       type: z.enum(["highpass", "lowshelf", "highshelf", "peak"]), hz: z.number().min(20).max(20000),
@@ -344,9 +351,11 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
       preDelayMs: z.number().min(0).max(200).default(20),
     }).optional().describe("Add a room to this track after the instrument, for example { wet: 0.22, roomSize: 0.75 } for a piano in a hall. The stem keeps its reverb, so the stems still sum to the mix."),
   })).min(1).max(8),
-}, async ({ midi, outputDirectory, durationSeconds, tracks }) => {
+  cleanupLogs: z.boolean().default(false).describe('Linux: delete the Decent Sampler log files in ~/.config/DecentSampler that this render wrote. Older files are left alone.'),
+}, async ({ midi, outputDirectory, durationSeconds, tracks, cleanupLogs }) => {
   const python = process.env.LMMS_VST3_PYTHON;
   if (!python) throw new Error('Set LMMS_VST3_PYTHON. See list_external_tools and the README.');
+  for (const track of tracks) checkNoteMap(track.noteMap);
   const names = tracks.map(track => track.name.toLowerCase());
   if (new Set(names).size !== names.length || names.includes('mix')) throw new Error('Use unique stem names other than mix');
   const midiPath = path.join(root, midi);
@@ -375,9 +384,9 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
   await mkdir(directory);
   const request = path.join(directory, '.render.json');
   try {
-    await writeFile(request, JSON.stringify({ midi: midiPath, directory, frames, tracks: assignments }), { flag: 'wx' });
-    const { stdout } = await run(python, [fileURLToPath(vstWorker), request], { timeout: 590000, windowsHide: true });
-    const { sharedGain } = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
+    await writeFile(request, JSON.stringify({ midi: midiPath, directory, frames, tracks: assignments, cleanupLogs }), { flag: 'wx' });
+    const { stdout } = await run(python, [fileURLToPath(vstWorker), request], { timeout: renderTimeoutMs(tracks.length, durationSeconds), windowsHide: true });
+    const { sharedGain, warnings = [] } = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
     const stems = [];
     for (const filename of [...tracks.map(track => track.name + '.wav'), 'mix.wav']) {
       const wav = await readFile(path.join(directory, filename));
@@ -388,7 +397,7 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
       stems.push({ file: filename, ...stats });
     }
     await rm(request);
-    const manifest = { midi, sampleRate: 48000, frames, sharedGain, tracks, stems };
+    const manifest = { midi, sampleRate: 48000, frames, sharedGain, tracks, stems, ...(warnings.length ? { warnings } : {}) };
     await writeFile(path.join(directory, 'manifest.json'), JSON.stringify(manifest, null, 2), { flag: 'wx' });
     return { directory: outputDirectory, ...manifest };
   } catch (error) {
@@ -787,8 +796,9 @@ function masterAudio(audio, { targetLufs, ceilingDb, wrap = false }) {
       dsp.applyGain(audio, 10 ** (gain / 20));
       report.gainDb = Number((report.gainDb + gain).toFixed(2));
     }
-    const limited = dsp.limit(audio, ceiling, { wrap });
-    report.limiter = { ceilingDb: ceiling, limitedSamples: (report.limiter?.limitedSamples ?? 0) + limited.limitedSamples,
+    const limited = dsp.limitTruePeak(audio, ceiling, { wrap });
+    report.truePeakDbfs = limited.truePeakDb;
+    report.limiter = { ceilingDb: ceiling, truePeak: true, limitedSamples: (report.limiter?.limitedSamples ?? 0) + limited.limitedSamples,
       maxReductionDb: Math.min(report.limiter?.maxReductionDb ?? 0, limited.maxReductionDb) };
     if (!limited.limitedSamples) break;
   }
@@ -848,7 +858,7 @@ function measureWav(wav) {
 const tailMode = z.enum(['cut', 'wrap', 'keep']).default('cut')
   .describe('cut: stop at the last bar (default). wrap: fold the reverb and delay tail back onto the start for a seamless loop. keep: let the tail ring out (one extra bar).');
 const loudnessTarget = z.number().min(-36).max(-6).optional().describe('Integrated loudness target in LUFS, for example -16 for game music.');
-const ceilingTarget = z.number().min(-12).max(0).optional().describe('Peak ceiling in dBFS for the built-in limiter (default -1 when a loudness target is set).');
+const ceilingTarget = z.number().min(-12).max(0).optional().describe('True-peak ceiling in dBTP for the built-in limiter, measured with 4x oversampling so inter-sample peaks stay under it (default -1 when a loudness target is set).');
 async function renderMix(doc, { tail = 'cut', targetLufs, ceilingDb } = {}) {
   const info = songInfo(doc);
   const raw = await renderDoc(doc, { loop: tail === 'cut' });

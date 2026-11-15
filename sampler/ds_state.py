@@ -61,10 +61,42 @@ def make_state(template_state, dspreset_text, sample_path, name="preset"):
     return pack(outer.encode("utf-8"), outer_tail)
 
 
+def inner_xml(raw_state):
+    """The <DecentSampler> preset XML held inside a plugin state, as text."""
+    outer_xml, _ = unpack(raw_state)
+    m = re.search(r"<IComponent>(.*?)</IComponent>", outer_xml.decode("utf-8"), re.S)
+    return unpack(b64_decode(m.group(1).strip()))[0].decode("utf-8")
+
+
+def wait_for_state(plugin, timeout=10.0, interval=0.05, sleep=None, clock=None):
+    """Wait until a newly set state has been applied.
+
+    Decent Sampler applies raw_state on a background thread, which takes about 0.2 to 0.7 s, and pedalboard rebuilds the plugin
+    from its saved state on every call. A render that starts first plays the old, empty preset and comes back silent. Poll raw_state
+    until the preset XML holds a <sample element. Returns the seconds waited, or None if it never did.
+    """
+    import time
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    started = clock()
+    while True:
+        try:
+            if "<sample" in inner_xml(plugin.raw_state):
+                return clock() - started
+        except (AssertionError, AttributeError, ValueError, UnicodeDecodeError):
+            pass  # the state is momentarily not in the expected shape while it is being applied
+        if clock() - started >= timeout:
+            return None
+        sleep(interval)
+
+
 def load_dspreset(plugin, dspreset_path, sample_path, name="preset", wait=True):
     with open(dspreset_path, encoding="utf-8") as handle:
         text = handle.read()
     plugin.raw_state = make_state(plugin.raw_state, text, sample_path.replace("\\", "/"), name)
+    # Only a preset that has samples can show them in the state; an empty one falls through to the sound check, which reports it.
+    if wait and "<sample" in text and wait_for_state(plugin) is None:
+        raise RuntimeError(f"{name}: the plugin did not apply the preset state within 10 seconds.")
     if wait and wait_until_loaded(plugin) is None:
         raise RuntimeError(f"{name}: the preset loaded but no key makes a sound. Check that its sample files exist.")
     return plugin
