@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Add optional `render_atelier` and `render_theremin` stereo instrument stem tools.
+
 - Add optional `groovebox_pattern`, `render_groovebox` and `load_pad_kit` tools for locally installed Atelier DSP.
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.

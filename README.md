@@ -202,6 +202,10 @@ Link a local checkout of the private Atelier DSP engine with `npm link atelier-d
 - `load_pad_kit` validates a kit JSON file in `LMMS_WORKSPACE` and returns its pad data.
 - `render_groovebox` writes a new stereo WAV or MIDI file in `LMMS_WORKSPACE`. For sampler pads, pass a map from each pad's asset ID to the workspace WAV file.
 
+## Optional Atelier instrument renderers
+
+Use the same local Atelier DSP link or `LMMS_ATELIER_DSP` setting as the groovebox tools. `render_atelier` renders a Fathom, Vesper or Halo voice from inline notes, a track in a workspace MIDI file or a track in an LMMS project. Supply a compatible workspace bank and preset, or use an installed factory preset. `render_theremin` supports timed notes, continuous pitch curves, free glide and scale snapping. Both write a 48 kHz stereo WAV to the workspace. Set `durationSeconds` to zero-pad stems to the same length, allowing room for the voice release.
+
 ## External VST3 instruments
 
 ### Companion tool coverage
