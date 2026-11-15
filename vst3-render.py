@@ -87,6 +87,42 @@ def add_reverb(audio, settings, rate):
     return (audio + wet * settings.get("wet", 0.22)).astype(np.float32)
 
 
+
+# Built-in pedalboard effects that can be used without third-party plugins.
+BUILTIN_EFFECTS = {
+    "compressor": lambda p: __import__("pedalboard").Compressor(
+        threshold_db=p.get("thresholdDb", -18), ratio=p.get("ratio", 4),
+        attack_ms=p.get("attackMs", 10), release_ms=p.get("releaseMs", 100)),
+    "distortion": lambda p: __import__("pedalboard").Distortion(drive_db=p.get("driveDb", 20)),
+    "reverb": lambda p: __import__("pedalboard").Reverb(
+        room_size=p.get("roomSize", 0.5), damping=p.get("damping", 0.5),
+        wet_level=p.get("wet", 0.3), dry_level=p.get("dry", 0.7)),
+    "limiter": lambda p: __import__("pedalboard").Limiter(threshold_db=p.get("thresholdDb", -1)),
+}
+
+def apply_effects(audio, effects, rate):
+    """Apply a chain of built-in or VST3 effects. Additive to existing EQ/space/reverb."""
+    if not effects:
+        return audio
+    from pedalboard import Pedalboard, load_plugin
+    import numpy as np
+    chain = []
+    for eff in effects:
+        kind = eff.get("type") or eff.get("plugin")
+        if kind in BUILTIN_EFFECTS:
+            chain.append(BUILTIN_EFFECTS[kind](eff))
+        elif isinstance(kind, str) and kind.endswith(".vst3"):
+            plug = load_plugin(kind)
+            if plug.is_instrument:
+                raise ValueError(f"Effect plugin {kind} is an instrument")
+            chain.append(plug)
+        else:
+            raise ValueError(f"Unknown effect type: {kind}")
+    if chain:
+        board = Pedalboard(chain)
+        audio = board(audio.astype(np.float32), rate)
+    return audio
+
 def main():
     if sys.argv[1] == "probe":
         print(json.dumps({name: importlib.util.find_spec(name) is not None
@@ -158,6 +194,8 @@ def main():
             audio = add_space(audio, assignment["space"], rate)
         if assignment.get("reverb"):
             audio = add_reverb(audio, assignment["reverb"], rate)
+        if assignment.get("effects"):
+            audio = apply_effects(audio, assignment["effects"], rate)
         audio *= 10 ** (assignment["gainDb"] / 20)
         mix += audio
         stems.append((assignment["name"] + ".wav", audio))

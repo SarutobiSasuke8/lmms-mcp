@@ -343,6 +343,14 @@ tool('render_vst3_stems', 'Render named tracks from an editable format 1 MIDI ex
       damping: z.number().min(0).max(1).default(0.5), width: z.number().min(0).max(1).default(1),
       preDelayMs: z.number().min(0).max(200).default(20),
     }).optional().describe("Add a room to this track after the instrument, for example { wet: 0.22, roomSize: 0.75 } for a piano in a hall. The stem keeps its reverb, so the stems still sum to the mix."),
+    effects: z.array(z.object({
+      type: z.enum(["compressor", "distortion", "reverb", "limiter"]).optional().describe("Built-in pedalboard effect."),
+      plugin: z.string().regex(/\.vst3$/i).optional().describe("Path to a VST3 effect plugin."),
+      thresholdDb: z.number().optional(), ratio: z.number().optional(),
+      attackMs: z.number().optional(), releaseMs: z.number().optional(),
+      driveDb: z.number().optional(), roomSize: z.number().optional(),
+      damping: z.number().optional(), wet: z.number().optional(), dry: z.number().optional(),
+    })).max(8).optional().describe("Optional effect chain (built-in or VST3) applied after the instrument. Additive to EQ/space/reverb."),
   })).min(1).max(8),
 }, async ({ midi, outputDirectory, durationSeconds, tracks }) => {
   const python = process.env.LMMS_VST3_PYTHON;
