@@ -7,6 +7,16 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Added
 
 - Styles are available as data in `tools/styles.json` (canonical form). `compose.mjs` still owns the runtime object; the JSON is the editable source of truth for style definitions.
+- Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
+
+- Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
+- Add optional `render_atelier` and `render_theremin` stereo instrument stem tools.
+- Time-stretch WAV loops and chop drum breaks with sixteenth-note or transient slicing, pattern sequencing and a slice manifest.
+- `lmms-compose nightly` renders and ranks soundtrack cues unattended and builds dated audition pages.
+- `scale_lock`, `arpeggiate` and `note_probability`: edits (and `apply_edits` steps) that snap a track to a named scale, turn chords into arpeggios, and drop or vary notes by seeded chance. Drum tracks are skipped unless named.
+- SoundFont rendering: `list_soundfonts` and `render_soundfont` drive FluidSynth to render a workspace MIDI through a `.sf2` or `.sf3` into a WAV. Configurable via `LMMS_FLUIDSYNTH` and optional `LMMS_SOUNDFONTS`. See docs/soundfont.md.
+- `write_loop_points`: write loop start and end into a WAV (`smpl` chunk) or OGG (`LOOPSTART`, `LOOPEND`, `LOOPLENGTH`) with a `.loop.json` sidecar, or tag a `prepare_loop` manifest's files in place.
+- Add optional `groovebox_pattern`, `render_groovebox` and `load_pad_kit` tools for locally installed Atelier DSP.
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `convert_sfz` applies controller modulation at the default values (`*_onccN` for envelopes, volume, pan, tuning, offset and velocity tracking) with the standard SFZ curves, so the Salamander Grand gets its intended 73% velocity tracking and 1 second release. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends.
@@ -14,6 +24,11 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Changed
 
 - `setup-libraries-windows.ps1` fetches the Salamander Grand Piano (CC BY 3.0, about 720 MB) as the default piano. The Splendid Grand is still available with `-Only splendid`.
+
+### Fixed
+
+- Loops that start with a drum hit are no longer flagged as clicking at the loop join. `analyze` reports `loop.boundaryStepDbfs`, and the warning fires only when the join jumps more than 6 dB above the step between neighbouring samples.
+- VST3 stem rendering aligns one-frame rounding differences to the requested length and reports malformed or silent output separately.
 
 ## 0.9.1 - 2026-11-15
 
@@ -23,6 +38,8 @@ No tool changes. Every 0.9.0 tool keeps its name and its required arguments.
 
 - `build_timeline_page`: one HTML page that shows a song as a DAW would, with each stem as a lane under a bar ruler, sections and DJ effects as blocks, synced playback with mute and solo, section looping, and notes pinned to bars that can be copied back. The library page links each track to its timeline.
 - `tag_sound` and `list_tagged`: metadata for workspace sounds and finished pieces (title, composer, era, genre, mood, game use, arrangement, instrumentation, length, loop, source, licence, credits, date) kept in a `<name>.meta.json` sidecar shared by every format of the same name, checked on write and searchable by any field. See [docs/sound-library.md](docs/sound-library.md).
+
+- Reggae, dub and dubstep styles for `compose_piece`: off-beat `skank` and `bubble` accompaniment with an optional dub `echo`, `reggae`, `sub` and `wobble` bass, `onedrop`, `rockers`, `steppers` and `dubstep` drums, a drop-out under the dub solo and a siren track.
 
 ### Changed
 
