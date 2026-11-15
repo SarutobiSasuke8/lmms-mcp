@@ -705,6 +705,7 @@ tool('list_presets', 'List installed factory presets: native .xpf paths, plus Zy
 
 // ---------- rendering ----------
 const renderLimit = Number(process.env.LMMS_RENDER_TIMEOUT_SECONDS) || null;
+const nightlyDeadline = Number(process.env.LMMS_NIGHTLY_DEADLINE_MS) || null;
 function forRender(doc) {
   const copy = parse(xml.serializeToString(doc));
   const list = tracks(copy);
@@ -730,10 +731,14 @@ async function renderDoc(doc, { loop = true, prepared = false } = {}) {
   try {
     const project = path.join(temp, 'render.mmp'), rendered = path.join(temp, 'render.wav');
     await writeFile(project, xml.serializeToString(copy));
+    const remaining = nightlyDeadline === null ? Infinity : nightlyDeadline - Date.now();
+    if (remaining <= 0) throw new Error('Recipe time budget exceeded');
+    const timeout = Math.min(seconds * 1000, remaining);
     try {
       await run(lmms, ['render', project, '-s', '48000', '-f', 'wav', ...(loop ? ['-l'] : []), '-o', rendered],
-        { cwd: root, timeout: seconds * 1000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+        { cwd: root, timeout, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     } catch (error) {
+      if (error.killed && timeout === remaining) throw new Error('Recipe time budget exceeded');
       if (error.killed) throw new Error(`LMMS did not finish rendering within ${seconds} seconds. Set LMMS_RENDER_TIMEOUT_SECONDS to allow longer.`);
       throw new Error(error.code === 'ENOENT' ? `LMMS was not found at ${lmms}. Set LMMS_EXECUTABLE.` : 'LMMS render failed: ' + String(error.message).split('\n')[0]);
     }

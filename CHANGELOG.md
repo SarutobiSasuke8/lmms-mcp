@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- `lmms-compose nightly` renders and ranks soundtrack cues unattended and builds dated audition pages.
 - `scale_lock`, `arpeggiate` and `note_probability`: edits (and `apply_edits` steps) that snap a track to a named scale, turn chords into arpeggios, and drop or vary notes by seeded chance. Drum tracks are skipped unless named.
 - SoundFont rendering: `list_soundfonts` and `render_soundfont` drive FluidSynth to render a workspace MIDI through a `.sf2` or `.sf3` into a WAV. Configurable via `LMMS_FLUIDSYNTH` and optional `LMMS_SOUNDFONTS`. See docs/soundfont.md.
 - `write_loop_points`: write loop start and end into a WAV (`smpl` chunk) or OGG (`LOOPSTART`, `LOOPEND`, `LOOPLENGTH`) with a `.loop.json` sidecar, or tag a `prepare_loop` manifest's files in place.
