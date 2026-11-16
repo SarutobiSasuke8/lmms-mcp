@@ -42,9 +42,10 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Write tunes | `write_melody`, `write_accompaniment` ([docs/melody.md](docs/melody.md)) |
 | Local generation catalogue | Search, rate and backfill render and composition manifests ([docs/catalogue.md](docs/catalogue.md)) |
 | Publish approved generations to R2 | `publish_to_r2` (dry run by default), `list_r2_assets` ([docs/r2.md](docs/r2.md)) |
+| Nightly soundtrack runs | Headless recipe batches and dated listening pages ([docs/nightly.md](docs/nightly.md)) |
 | Whole pieces | `compose_piece`, `compose_batch`, and `lmms-compose` on the command line with no agent ([docs/compose.md](docs/compose.md)) |
 | Solo lines | `write_solo` |
-| DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio` |
+| DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio`, `time_stretch`, `chop_break` ([break editing](docs/break-edits.md)) |
 | Scores and performance | `import_midi`, `shape_performance`, `master_audio` ([docs/midi-import.md](docs/midi-import.md)) |
 | Phrase library | `list_phrases`, `get_phrase`, `create_from_phrases`, `add_phrase`, `save_phrase`, `rate_phrase` ([docs/phrases.md](docs/phrases.md)) |
 | Browse sounds | `build_library_page`, `build_library_previews`, `tag_sound`, `list_tagged` ([docs/sound-library.md](docs/sound-library.md)) |
@@ -169,6 +170,10 @@ Use `export_one_shots` to process up to 32 mono or stereo 48 kHz, 16-bit PCM WAV
 
 A sampler track that plays a workspace WAV stores its absolute path. Use LMMS to relink the source if you move the project to a different machine. Stock samples are stored by their library path and move with any LMMS installation.
 
+## Visual Mix Desk
+
+Start the local sound library server and open `/mix-desk/`, or choose **Add to desk** on a playable row in a rebuilt library page. The browser desk mixes 8 channels, resamples or records loops, and saves takes and tagged mixes into the same workspace. See [Mix Desk controls](docs/mix-desk.md).
+
 ## Fathom Atelier
 
 Set `LMMS_FATHOM_WORKLET` to the absolute path of a trusted Fathom Atelier checkout's `public/worklets/synth-processor.js` before launching the MCP. The LMMS MCP package ships the adapter. The synth engine is supplied locally. Use `list_instruments` to check configuration and discover the stock plugin and preset inventory. The inventory checks files on disk. Third-party plugins loaded inside hosts such as Carla or VeSTige need their own inventory.
@@ -196,6 +201,31 @@ The bridge uses the written pitches, note lengths and velocities. It interpolate
 
 `search_sounds` lists Fathom patches only when the bridge is configured, or when you ask with `engine: "fathom"`.
 
+## SoundFonts
+
+`render_soundfont` renders a workspace MIDI file through a `.sf2` or `.sf3` using FluidSynth. Set `LMMS_FLUIDSYNTH` (or have `fluidsynth` on PATH) and optionally `LMMS_SOUNDFONTS`. See `docs/soundfont.md`.
+
+## Optional Atelier groovebox tools
+
+Link a local checkout of the private Atelier DSP engine with `npm link atelier-dsp` after registering the checkout with `npm link`, or set `LMMS_ATELIER_DSP` to the absolute path to its repository root. Use a branch that contains `src/groovebox/index.js`. The LMMS MCP server starts without the engine, and the groovebox tools report the local setup needed when called without it.
+
+- `groovebox_pattern` builds a 16-step project with per-hit velocity and a synth bass lane with accent and slide.
+- `load_pad_kit` validates a kit JSON file in `LMMS_WORKSPACE` and returns its pad data.
+- `render_groovebox` writes a new stereo WAV or MIDI file in `LMMS_WORKSPACE`. For sampler pads, pass a map from each pad's asset ID to the workspace WAV file.
+
+## Optional Atelier instrument renderers
+
+Use the same local Atelier DSP link or `LMMS_ATELIER_DSP` setting as the groovebox tools. `render_atelier` renders a Fathom, Vesper or Halo voice from inline notes, a track in a workspace MIDI file or a track in an LMMS project. Supply a compatible workspace bank and preset, or use an installed factory preset. `render_theremin` supports timed notes, continuous pitch curves, free glide and scale snapping. Both write a 48 kHz stereo WAV to the workspace. Set `durationSeconds` to zero-pad stems to the same length, allowing room for the voice release.
+
+## Optional Atelier workshop instruments
+
+Set `LMMS_ATELIER_INSTRUMENTS` to the absolute path of an atelier-instruments checkout that has `agent/index.js`. The server starts without it, and the `atelier_*` tools say what to set when it is missing. See [docs/atelier-workshop.md](docs/atelier-workshop.md).
+
+- `atelier_list_instruments` and `atelier_describe_instrument` list the instruments and give each one's JSON Schema, example and presets.
+- `atelier_render` renders a generator (trailer riser and impact, game SFX, creature calls, ambience beds, vowel choir, chord pads, arpeggiator, acid bass) to a 48 kHz workspace WAV. With `place`, it also adds the WAV to a copy of a project as a sample track at a bar.
+- `atelier_process` runs a workspace WAV through pump-sweep, tape-glitch or the robot voice vocoder.
+- `atelier_notes` returns chord-pads, arp-lab or acid-bass notes as an LMMS pattern for `create_project`, `add_track` or `add_pattern`.
+
 ## External VST3 instruments
 
 ### Companion tool coverage
@@ -209,12 +239,14 @@ The bridge uses the written pitches, note lengths and velocities. It interpolate
 
 The MCP package includes the VST3 adapter. Install the optional host dependencies and instruments locally to enable it. Use `list_external_tools` to see the upstream links, configured plugins and whether the selected Python has the required packages. The tool reports file presence. A render verifies whether a plugin and preset load successfully.
 
-On Windows x64 with Python 3.12 installed, run `./setup-vst3-windows.ps1` from the package or checkout. It downloads pinned portable Decent Sampler and Surge XT plug-ins from their publishers, checks their SHA-256 hashes and creates an isolated host environment. Copy the generated `mcp-env.json` entries into your MCP client's environment settings and restart the client. The default destination is `%LOCALAPPDATA%/lmms-mcp/vst3-v1`. Use `-InstallDirectory` with a new directory for a separate install or to retry a failed setup. The command leaves system plug-in folders alone and sample libraries are obtained separately.
+On Windows x64 with Python 3 installed, run `./setup-vst3-windows.ps1` from the package or checkout. It downloads pinned portable Decent Sampler and Surge XT plug-ins from their publishers, checks their SHA-256 hashes and creates an isolated host environment. Copy the generated `mcp-env.json` entries into your MCP client's environment settings and restart the client. The default destination is `%LOCALAPPDATA%/lmms-mcp/vst3-v1`. Use `-InstallDirectory` with a new directory for a separate install or to retry a failed setup. The command leaves system plug-in folders alone and sample libraries are obtained separately.
+
+On Linux x86_64, run `./setup-vst3-linux.sh`. It builds the same isolated host environment and takes each plug-in either from a download address with a mandatory SHA-256 (`DECENT_SAMPLER_URL`, `DECENT_SAMPLER_SHA256`, `SURGE_XT_URL`, `SURGE_XT_SHA256`) or from a `.vst3` folder you already have (`--decent-sampler-bundle`, `--surge-xt-bundle`). Point the settings at the `.vst3` folders, not the `.so` inside them. See [docs/linux-real-instruments.md](docs/linux-real-instruments.md).
 
 For manual setup, create an isolated Python environment and set its executable and both plugin locations in your MCP client environment:
 
 ```powershell
-py -3.12 -m venv .venv-vst3
+py -3 -m venv .venv-vst3
 .\.venv-vst3\Scripts\python.exe -m pip install pedalboard==0.9.26 mido==1.3.3
 $env:LMMS_VST3_PYTHON = (Resolve-Path .\.venv-vst3\Scripts\python.exe).Path
 $env:LMMS_DECENT_SAMPLER_VST3 = 'C:\path\to\DecentSampler.vst3\Contents\x86_64-win\DecentSampler.vst3'
