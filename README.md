@@ -227,6 +227,15 @@ Link a local checkout of the private Atelier DSP engine with `npm link atelier-d
 
 Use the same local Atelier DSP link or `LMMS_ATELIER_DSP` setting as the groovebox tools. `render_atelier` renders a Fathom, Vesper or Halo voice from inline notes, a track in a workspace MIDI file or a track in an LMMS project. Supply a compatible workspace bank and preset, or use an installed factory preset. `render_theremin` supports timed notes, continuous pitch curves, free glide and scale snapping. Both write a 48 kHz stereo WAV to the workspace. Set `durationSeconds` to zero-pad stems to the same length, allowing room for the voice release.
 
+## Optional Atelier workshop instruments
+
+Set `LMMS_ATELIER_INSTRUMENTS` to the absolute path of an atelier-instruments checkout that has `agent/index.js`. The server starts without it, and the `atelier_*` tools say what to set when it is missing. See [docs/atelier-workshop.md](docs/atelier-workshop.md).
+
+- `atelier_list_instruments` and `atelier_describe_instrument` list the instruments and give each one's JSON Schema, example and presets.
+- `atelier_render` renders a generator (trailer riser and impact, game SFX, creature calls, ambience beds, vowel choir, chord pads, arpeggiator, acid bass) to a 48 kHz workspace WAV. With `place`, it also adds the WAV to a copy of a project as a sample track at a bar.
+- `atelier_process` runs a workspace WAV through pump-sweep, tape-glitch or the robot voice vocoder.
+- `atelier_notes` returns chord-pads, arp-lab or acid-bass notes as an LMMS pattern for `create_project`, `add_track` or `add_pattern`.
+
 ## External VST3 instruments
 
 ### Companion tool coverage
