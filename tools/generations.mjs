@@ -31,6 +31,9 @@ function outputs(tool, args, result) {
   const entry = (files, facts = result, options = args) => ({ files, facts, options });
   const inFolder = filename => path.join(result.directory ?? args.outputDirectory, filename);
   switch (tool) {
+    case 'synth_drums': return [entry([...result.files.map(file => file.file), result.manifest])];
+    case 'layer_drum':
+    case 'tune_drum': return [entry([result.file])];
     case 'compose_piece':
     case 'create_drum_kit': return [entry([result.project])];
     case 'compose_batch':
@@ -97,7 +100,8 @@ export function generationStore(workspace, { measure, describeProject } = {}) {
 
   async function save(root, tool, args, facts, names, sources) {
     const files = await Promise.all(names.map(name => fingerprint(root, name)));
-    const inputNames = [args.project, args.midi, tool === 'master_audio' ? args.audio : null,
+    const inputNames = [tool === 'tune_drum' ? args.input : null,
+      ...(tool === 'layer_drum' ? args.layers.map(layer => layer.file) : []), args.project, args.midi, tool === 'master_audio' ? args.audio : null,
       ...(args.sounds ?? []).map(sound => sound.input)].filter(Boolean);
     const inputs = await Promise.all([...new Set(inputNames)].map(async name => {
       try {
@@ -157,7 +161,10 @@ export function generationStore(workspace, { measure, describeProject } = {}) {
       const root = await realpath(workspace);
       return serial(async () => {
         const ids = [];
-        for (const item of items) ids.push((await save(root, tool, item.options, item.facts, item.files)).id);
+        for (const item of items) {
+          const sources = tool === 'synth_drums' ? ['lmms-mcp-drum-synthesis'] : undefined;
+          ids.push((await save(root, tool, item.options, item.facts, item.files, sources)).id);
+        }
         return ids;
       });
     },

@@ -5,5 +5,7 @@
   "virtuosity-drums": { "licence": "CC0-1.0", "credit": "Virtuosity Drums by Versilian Studios and Karoryfer Samples", "source": "https://github.com/sfzinstruments/virtuosity_drums" },
   "fluidr3-gm": { "licence": "MIT", "credit": "Fluid (R3) SoundFont by Frank Wen", "source": "https://github.com/Meowchestra/SoundFonts/blob/main/LICENSE" },
   "surge-xt": { "licence": "GPL-3.0-or-later", "outputLicence": "unrestricted-synthesis", "credit": "Surge XT by the Surge Synth Team", "source": "https://github.com/surge-synthesizer/surge" },
-  "lmms-factory-drums": { "licence": "GPL-2.0-or-later", "credit": "LMMS factory sample distribution", "source": "https://github.com/LMMS/lmms/blob/v1.2.2/LICENSE.txt" }
+  "lmms-factory-drums": { "licence": "GPL-2.0-or-later", "credit": "LMMS factory sample distribution", "source": "https://github.com/LMMS/lmms/blob/v1.2.2/LICENSE.txt" },
+  "lmms-mcp-drum-synthesis": { "licence": "MIT", "credit": "LMMS MCP drum synthesizer", "source": "https://github.com/SarutobiSasuke8/lmms-mcp" },
+  "freepats-synth-percussion-20220718": { "licence": "CC0-1.0", "credit": "FreePats synthesizer percussion by Roberto", "source": "https://freepats.zenvoid.org/Percussion/electric-percussion.html" }
 }

@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Add `synth_drums`, `fetch_kit`, `build_kit`, `layer_drum` and `tune_drum` for original one-shots, pinned CC0 samples and mapped percussion kits.
+
 - Groove engine tools: `apply_groove` (MPC swing, UKG, house, amapiano, half-time), `humanize` (seeded timing/velocity), `add_ghost_notes`, `add_fills`, `layer_drums`. Deterministic. Operate on note arrays.
 - `arrangement_plan` generates bar-aligned section maps (intro/build/drop/breakdown/outro) with energy and role hints for house, techno, DnB and UKG. `energy_curve` extracts the envelope. Deterministic.
 - `render_vocal_syllable` generates short vocal-like syllables (a/e/i/o/u) with simple formant synthesis. `chop_vocal` slices a workspace vocal WAV into rhythmic chops. Deterministic.
