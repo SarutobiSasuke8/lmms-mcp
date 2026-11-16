@@ -35,7 +35,7 @@ foreach ($download in $downloads) {
     Remove-Item -LiteralPath $archive
 }
 $venv = Join-Path $directory 'venv'
-if ($Python -eq 'py') { & $Python -3.12 -m venv $venv } else { & $Python -m venv $venv }
+if ($Python -eq 'py') { & $Python -3 -m venv $venv } else { & $Python -m venv $venv }
 if ($LASTEXITCODE -ne 0) { throw 'Python virtual environment setup failed' }
 $pythonExe = Join-Path $venv 'Scripts/python.exe'
 & $pythonExe -m pip install --disable-pip-version-check pedalboard==0.9.26 mido==1.3.3
