@@ -7,17 +7,36 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 ### Added
 
 - Render, compose, master and export tools now record generation manifests in a local catalogue with SHA-256 deduplication, rating, and licence provenance.
+- Add optional `atelier_list_instruments`, `atelier_describe_instrument`, `atelier_render`, `atelier_process` and `atelier_notes` tools for a local atelier-instruments checkout: eleven generators, processors and note generators with strict params, 48 kHz output, and placement on a bar as a sample track.
+- Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
+
+- Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
+- Add optional `render_atelier` and `render_theremin` stereo instrument stem tools.
+- Time-stretch WAV loops and chop drum breaks with sixteenth-note or transient slicing, pattern sequencing and a slice manifest.
+- `lmms-compose nightly` renders and ranks soundtrack cues unattended and builds dated audition pages.
+- `scale_lock`, `arpeggiate` and `note_probability`: edits (and `apply_edits` steps) that snap a track to a named scale, turn chords into arpeggios, and drop or vary notes by seeded chance. Drum tracks are skipped unless named.
+- SoundFont rendering: `list_soundfonts` and `render_soundfont` drive FluidSynth to render a workspace MIDI through a `.sf2` or `.sf3` into a WAV. Configurable via `LMMS_FLUIDSYNTH` and optional `LMMS_SOUNDFONTS`. See docs/soundfont.md.
+- `write_loop_points`: write loop start and end into a WAV (`smpl` chunk) or OGG (`LOOPSTART`, `LOOPEND`, `LOOPLENGTH`) with a `.loop.json` sidecar, or tag a `prepare_loop` manifest's files in place.
 - Add optional `groovebox_pattern`, `render_groovebox` and `load_pad_kit` tools for locally installed Atelier DSP.
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `convert_sfz` applies controller modulation at the default values (`*_onccN` for envelopes, volume, pan, tuning, offset and velocity tracking) with the standard SFZ curves, so the Salamander Grand gets its intended 73% velocity tracking and 1 second release. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends.
+- `render_vst3_stems` takes per track `noteMap` (move notes to the keys a kit uses, for example drums exported at note 69), `transpose`, `noteRange`, and `normalise` (peak target in dBFS). The result gains `warnings` for notes outside the preset's range. New `cleanupLogs` deletes the Decent Sampler log files a render wrote in `~/.config/DecentSampler` on Linux. See [docs/linux-real-instruments.md](docs/linux-real-instruments.md).
+- `setup-vst3-linux.sh` sets up the VST3 host on Linux x86_64: an isolated Python environment, plug-ins from a verified download or a local `.vst3` folder, and `mcp-env.json`.
+- `sampler/check_real_plugin.py`: an optional check that renders sound through a real Decent Sampler, and skips when none is configured.
 
 ### Changed
 
+- `render_vst3_stems` raises the `gainDb` limit from +12 to +36 dB, scales its time allowance with the track count and length (never below the old 590 s, `LMMS_VST3_TIMEOUT_SECONDS` to override) and starts plug-ins with `initialization_timeout=3`.
+- `ceilingDb` on `render_mix`, `export_game_audio` and the DJ tools is a true-peak ceiling: the limiter measures 4x oversampled peaks, so -1 gives about -1 dBTP instead of -0.3 dBTP. The mastering report adds `truePeakDbfs`.
+- On Linux the VST3 worker loads the `.vst3` bundle folder even when the setting points at the binary inside it, and LMMS presets and samples are also looked up in `../share/lmms` and `/usr/share/lmms`.
+- `list_external_tools` gives setup text for the platform it runs on. The Python 3.12 pin is gone from the Windows setup script.
 - `setup-libraries-windows.ps1` fetches the Salamander Grand Piano (CC BY 3.0, about 720 MB) as the default piano. The Splendid Grand is still available with `-Only splendid`.
 
 ### Fixed
 
+- Decent Sampler no longer renders silence after a preset is set: the worker polls the plug-in's state until the new preset is applied (Decent Sampler applies it on a background thread) before it plays the sound check.
+- Loops that start with a drum hit are no longer flagged as clicking at the loop join. `analyze` reports `loop.boundaryStepDbfs`, and the warning fires only when the join jumps more than 6 dB above the step between neighbouring samples.
 - VST3 stem rendering aligns one-frame rounding differences to the requested length and reports malformed or silent output separately.
 
 ## 0.9.1 - 2026-11-15
