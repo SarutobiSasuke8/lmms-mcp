@@ -54,6 +54,8 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Loops | `find_loop_points`, `prepare_loop` ([docs/loop-prep.md](docs/loop-prep.md)) |
 | Audition | `build_audition_page`, `read_feedback`, `remember_taste`, `get_taste` ([docs/audition.md](docs/audition.md)) |
 | External instruments | `list_external_tools`, `render_vst3_stems`, `convert_sfz` ([docs/sampler.md](docs/sampler.md)) |
+| Catalogue, loop tags and SoundFonts | `list_generations`, `show_generation`, `rate_generation`, `backfill_catalog` ([docs/catalogue.md](docs/catalogue.md)), `write_loop_points` ([docs/loop-prep.md](docs/loop-prep.md)), `list_soundfonts`, `render_soundfont` ([docs/soundfont.md](docs/soundfont.md)) |
+| Optional Atelier pedalboard | `render_pedal_chain` processes a workspace WAV through a saved pedalboard preset; it needs the same optional local Atelier DSP link as the groovebox tools |
 
 A beat has 48 ticks and a 4/4 bar has 192. Bars start at zero. Files use simple names in the workspace, and existing files are protected from overwrites unless a tool says otherwise.
 
