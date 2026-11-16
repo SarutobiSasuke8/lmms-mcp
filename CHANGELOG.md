@@ -6,6 +6,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Add optional `atelier_list_instruments`, `atelier_describe_instrument`, `atelier_render`, `atelier_process` and `atelier_notes` tools for a local atelier-instruments checkout: eleven generators, processors and note generators with strict params, 48 kHz output, and placement on a bar as a sample track.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
 - Add a local visual Mix Desk to the library server, with looping, insert effects, sample picker, and session and WAV saves.
