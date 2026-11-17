@@ -1,0 +1,158 @@
+{
+  "id": "persona-fixture",
+  "name": "Fixture Cue",
+  "kind": "film",
+  "tags": [
+    "percussive",
+    "minimal"
+  ],
+  "brief": "A sparse cue built around a dry pulse and glassy lead.",
+  "neverDo": [
+    "Quote an existing cue."
+  ],
+  "tempo": {
+    "min": 95,
+    "max": 115,
+    "default": 102,
+    "timeSignature": "4/4"
+  },
+  "swing": {
+    "template": "loose-sixteenths",
+    "amount": 0.3
+  },
+  "groove": {
+    "template": "tight-pulse",
+    "humanizeMs": 7,
+    "fillInterval": 3
+  },
+  "drums": {
+    "kit": "native-kit",
+    "patterns": "chiptune"
+  },
+  "bass": {
+    "approach": "An even pulse in the lower register.",
+    "archetype": "roots"
+  },
+  "harmony": {
+    "scales": [
+      "natural minor"
+    ],
+    "modes": [
+      "dorian"
+    ],
+    "keys": [
+      "D dorian"
+    ],
+    "progressions": [
+      [
+        "i",
+        "IV",
+        "VII",
+        "i"
+      ]
+    ],
+    "voicings": [
+      "Open fifths"
+    ]
+  },
+  "signatureSounds": [
+    {
+      "role": "lead",
+      "engine": "surge",
+      "preset": "dry-pulse",
+      "fallback": {
+        "voice": "pluck",
+        "volume": 39
+      }
+    },
+    {
+      "role": "harmony",
+      "engine": "native",
+      "preset": "pad",
+      "fallback": {
+        "voice": "pad",
+        "volume": 26
+      }
+    },
+    {
+      "role": "pad",
+      "engine": "native",
+      "preset": "pad",
+      "fallback": {
+        "voice": "pad",
+        "volume": 20
+      }
+    },
+    {
+      "role": "bass",
+      "engine": "native",
+      "preset": "bass",
+      "fallback": {
+        "voice": "bass",
+        "volume": 31
+      }
+    },
+    {
+      "role": "kick",
+      "engine": "native",
+      "preset": "kick",
+      "fallback": {
+        "voice": "kick",
+        "volume": 40
+      }
+    },
+    {
+      "role": "snare",
+      "engine": "native",
+      "preset": "clap",
+      "fallback": {
+        "voice": "clap",
+        "volume": 26
+      }
+    },
+    {
+      "role": "hat",
+      "engine": "native",
+      "preset": "hat",
+      "fallback": {
+        "voice": "hat",
+        "volume": 22
+      }
+    },
+    {
+      "role": "crash",
+      "engine": "native",
+      "preset": "hat",
+      "fallback": {
+        "voice": "hat",
+        "volume": 18
+      }
+    }
+  ],
+  "arrangement": {
+    "habits": [
+      "Rest before each return."
+    ],
+    "phraseBars": 2,
+    "energyCurve": "slow-rise",
+    "variants": [
+      "short-cue"
+    ]
+  },
+  "mix": {
+    "targets": {
+      "lufs": -18,
+      "truePeakDb": -2
+    },
+    "fx": [],
+    "platformPreset": "game"
+  },
+  "recipe": "recipes/fixture.json",
+  "testRender": {
+    "seconds": 35,
+    "seed": 17,
+    "listeningNotes": [
+      "Check that the pulse remains clear."
+    ]
+  }
+}

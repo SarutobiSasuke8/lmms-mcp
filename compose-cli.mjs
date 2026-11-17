@@ -12,12 +12,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
-  style: { type: 'string' }, key: { type: 'string' }, bpm: { type: 'string' }, seconds: { type: 'string' }, bars: { type: 'string' },
+  persona: { type: 'string' }, style: { type: 'string' }, key: { type: 'string' }, bpm: { type: 'string' }, seconds: { type: 'string' }, bars: { type: 'string' },
   out: { type: 'string' }, 'budget-seconds': { type: 'string' }, 'min-free-mib': { type: 'string' }, 'keep-days': { type: 'string' },
   count: { type: 'string' }, seed: { type: 'string' }, name: { type: 'string' }, help: { type: 'boolean', short: 'h' },
 } });
 if (values.help) {
-  console.log('Usage: lmms-compose [recipe.json] [--style chiptune|adventure|battle|ballad|swing|reggae|dub|dubstep] [--key "D minor"] [--bpm 120]\n       [--seconds 60 | --bars 32] [--count 6] [--seed 1] [--name piece]\nComposes --count seeds, renders each with LMMS and prints them ranked by measured checks.\n       lmms-compose nightly <recipes-dir|list.json> --out <dir> [--budget-seconds 1800] [--min-free-mib 1024] [--keep-days N]');
+  console.log('Usage: lmms-compose [recipe.json] [--persona id] [--style chiptune|adventure|battle|ballad|swing|reggae|dub|dubstep] [--key "D minor"] [--bpm 120]\n       [--seconds 60 | --bars 32] [--count 6] [--seed 1] [--name piece]\nComposes --count seeds, renders each with LMMS and prints them ranked by measured checks.\n       lmms-compose nightly <recipes-dir|list.json> --out <dir> [--budget-seconds 1800] [--min-free-mib 1024] [--keep-days N]');
   process.exit(0);
 }
 async function connect(workspace, deadline) {
@@ -72,7 +72,7 @@ async function compose() {
   const fromFile = positionals[0] ? JSON.parse(await readFile(positionals[0], 'utf8')) : {};
   const number = (value, label) => { if (value === undefined) return undefined; const n = Number(value); if (!Number.isFinite(n)) throw new Error(`--${label} must be a number`); return n; };
   const recipe = { ...fromFile };
-  for (const field of ['style', 'key']) if (values[field] !== undefined) recipe[field] = values[field];
+  for (const field of ['persona', 'style', 'key']) if (values[field] !== undefined) recipe[field] = values[field];
   for (const field of ['bpm', 'seconds', 'bars']) if (values[field] !== undefined) recipe[field] = number(values[field], field);
   const count = number(values.count, 'count') ?? fromFile.count ?? 1;
   const seed = number(values.seed, 'seed') ?? fromFile.seed ?? 1;
@@ -93,8 +93,9 @@ async function compose() {
       console.log('\nThe scores catch faults. Listen to the top few and choose by ear.');
     } else {
       const project = `${name}-s${seed}.mmp`, audio = `${name}-s${seed}.wav`;
-      const piece = await call('compose_piece', { ...recipe, output: project, seed });
-      const render = await call('render_mix', { project, output: audio, tail: 'keep', targetLufs: -16, ceilingDb: -1.5 });
+      const { targetLufs, ceilingDb, ...composition } = recipe;
+      const piece = await call('compose_piece', { ...composition, output: project, seed });
+      const render = await call('render_mix', { project, output: audio, tail: 'keep', targetLufs: targetLufs ?? piece.mix?.targetLufs ?? -16, ceilingDb: ceilingDb ?? piece.mix?.ceilingDb ?? -1.5 });
       console.log(`${audio}: ${piece.style} in ${piece.key}, ${piece.bpm} BPM, ${render.durationSeconds} s, ${render.integratedLufs} LUFS, tune score ${piece.tune.score}\nProject: ${path.join(workspace, project)}`);
     }
   } catch (error) {
