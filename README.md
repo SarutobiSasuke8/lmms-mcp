@@ -8,7 +8,7 @@ Write game music with an AI agent and get engine-ready files back. The agent com
 
 Use `list_personas` to filter repository persona data by kind, tags, tempo range or search text. `describe_persona` returns the full brief and references. Pass the ID as `persona` to `compose_piece` or `compose_batch`, or use `lmms-compose --persona <id>` once the data file is installed.
 
-Persona files live in `personas/` and follow `personas/persona.schema.json`. Explicit tempo, key, style and voice arguments override the corresponding defaults. The current composer uses native sound fallbacks, 4/4, and its existing form. It applies the persona’s phrase length, compatible drum/bass patterns, swing, harmony, and the loudness and peak settings supported by the stock renderer. Other groove, arrangement, instrument and mix references are available through `describe_persona` for the corresponding engines to consume. Persona data ships separately.
+Persona files live in `personas/` and follow `personas/persona.schema.json`. Explicit tempo, key, style and voice arguments override the corresponding defaults. The current composer uses native sound fallbacks, 4/4, and its existing form. It applies the persona’s phrase length, compatible drum/bass patterns, swing, harmony, and the loudness and peak settings supported by the stock renderer. Other groove, arrangement, instrument and mix references are available through `describe_persona` for the corresponding engines to consume. Four film and game score personas ship in `personas/`: see [docs/film-personas.md](docs/film-personas.md).
 
 ## Windows setup
 
