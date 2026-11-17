@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -121,6 +121,19 @@ test('dry run is the default: it reads the bucket, prints keys, sizes and hashes
   assert.equal(s3.puts().length, 0);
   assert.equal(s3.objects.size, 0);
   assert.equal((await generations.show(id)).locations.r2, null);
+});
+
+test('dry run accepts a workspace opened through a directory alias', async t => {
+  const { root, generations, add } = await workspace(t);
+  const aliasParent = await mkdtemp(path.join(os.tmpdir(), 'lmms-r2-alias-'));
+  t.after(() => rm(aliasParent, { recursive: true, force: true }));
+  const alias = path.join(aliasParent, 'workspace');
+  await symlink(path.resolve(root), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const id = await add('cue.ogg', 'ogg-bytes');
+  const publisher = createPublisher({ root: alias, generations, env: {} });
+  const result = await publisher.publish({ id, game: 'forest', kind: 'cue' });
+  assert.equal(result.dryRun, true);
+  assert.equal(result.uploads[0].sha256, sha('ogg-bytes'));
 });
 
 test('dry run without configuration makes no request and says the version is assumed', async t => {

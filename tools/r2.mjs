@@ -145,8 +145,9 @@ export function licenceProblems(manifest) {
 const versionOf = (prefix, key) => key.startsWith(prefix) ? Number(key.slice(prefix.length).match(/^v(\d+)\./)?.[1] ?? 0) : 0;
 
 async function inWorkspace(root, relative) {
-  const full = await realpath(path.resolve(root, relative));
-  const check = path.relative(root, full);
+  const canonicalRoot = await realpath(root);
+  const full = await realpath(path.resolve(canonicalRoot, relative));
+  const check = path.relative(canonicalRoot, full);
   if (!check || path.isAbsolute(check) || check === '..' || check.startsWith('..' + path.sep)) throw new Error('Generation file is outside the workspace');
   if (!(await stat(full)).isFile()) throw new Error('Generation file is not a regular file');
   return full;
