@@ -8,6 +8,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 - Add `list_personas` and `describe_persona`, plus an optional persona on `compose_piece`, `compose_batch` and `lmms-compose`.
 - Render, compose, master and export tools now record generation manifests in a local catalogue with SHA-256 deduplication, rating, and licence provenance.
+- `publish_to_r2` promotes an approved catalogued generation to a private Cloudflare R2 bucket as immutable versioned keys (`games/<game>/<kind>/<slug>/v<N>.<ext>`) with a manifest that carries the credits, and keeps `games/<game>/index.json` for games to load. It is a dry run until `confirm: true`, never overwrites a versioned object, refuses unknown licences and missing credits, and saves the R2 location in the catalogue. `list_r2_assets` lists the bucket read only. Configuration comes from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET`. See [docs/r2.md](docs/r2.md).
 - Add optional `atelier_list_instruments`, `atelier_describe_instrument`, `atelier_render`, `atelier_process` and `atelier_notes` tools for a local atelier-instruments checkout: eleven generators, processors and note generators with strict params, 48 kHz output, and placement on a bar as a sample track.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
