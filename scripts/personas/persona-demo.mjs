@@ -3,6 +3,7 @@
 // Native uses stock LMMS voices and needs only LMMS. Sampled plays the same notes through Decent Sampler with the CC0 VSCO 2 CE
 // library, one library file per articulation (live keyswitching waits for the SFZ keyswitch fix). Both skip cleanly when
 // their requirements are missing, and say so. The report is measurement only: nothing here hears the audio.
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,7 +14,12 @@ import { getPersona } from '../../tools/personas.mjs';
 
 export function lmmsAvailable(env = process.env) {
   const executable = env.LMMS_EXECUTABLE ?? (process.platform === 'win32' ? 'C:/Program Files/LMMS/lmms.exe' : 'lmms');
-  return path.isAbsolute(executable) ? existsSync(executable) : true; // a bare command is resolved by the server, which reports it if it is missing
+  if (path.isAbsolute(executable)) return existsSync(executable);
+  const windows = process.platform === 'win32';
+  const result = spawnSync(windows ? 'where.exe' : '/bin/sh',
+    windows ? [executable] : ['-c', 'command -v -- "$1"', 'sh', executable],
+    { env, stdio: 'ignore' });
+  return result.status === 0;
 }
 export function sampledRequirements(env = process.env) {
   const missing = [];

@@ -6,7 +6,11 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Four film and game score personas: `action-score`, `horror-suspense`, `epic-fantasy` and `dark-synth-scifi`, described by sound only. The three orchestral ones name the CC0 VSCO 2 CE library by id with `articulations` keyswitch maps; `licences.json` records its source, author, licence and hashes and nothing from it is bundled. Live keyswitching waits for the SFZ keyswitch fix.
+- `scripts/personas/persona-demo.mjs` builds a reference cue for each film persona from a seed, renders it with stock LMMS voices or sampled instruments, and reports measured loudness, silences, onsets, pitch-class and spectral checks. Skips cleanly without LMMS, Decent Sampler or the library. See [docs/film-personas.md](docs/film-personas.md).
+
 - Add `list_personas` and `describe_persona`, plus an optional persona on `compose_piece`, `compose_batch` and `lmms-compose`.
+- Render, compose, master and export tools now record generation manifests in a local catalogue with SHA-256 deduplication, rating, and licence provenance.
 - Add optional `atelier_list_instruments`, `atelier_describe_instrument`, `atelier_render`, `atelier_process` and `atelier_notes` tools for a local atelier-instruments checkout: eleven generators, processors and note generators with strict params, 48 kHz output, and placement on a bar as a sample track.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 
@@ -18,9 +22,6 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - SoundFont rendering: `list_soundfonts` and `render_soundfont` drive FluidSynth to render a workspace MIDI through a `.sf2` or `.sf3` into a WAV. Configurable via `LMMS_FLUIDSYNTH` and optional `LMMS_SOUNDFONTS`. See docs/soundfont.md.
 - `write_loop_points`: write loop start and end into a WAV (`smpl` chunk) or OGG (`LOOPSTART`, `LOOPEND`, `LOOPLENGTH`) with a `.loop.json` sidecar, or tag a `prepare_loop` manifest's files in place.
 - Add optional `groovebox_pattern`, `render_groovebox` and `load_pad_kit` tools for locally installed Atelier DSP.
-
-- Four film and game score personas: `action-score`, `horror-suspense`, `epic-fantasy` and `dark-synth-scifi`, described by sound only. The three orchestral ones name the CC0 VSCO 2 CE library by id with `articulations` keyswitch maps; `licences.json` records its source, author, licence and hashes and nothing from it is bundled. Live keyswitching waits for the SFZ keyswitch fix.
-- `scripts/personas/persona-demo.mjs` builds a reference cue for each film persona from a seed, renders it with stock LMMS voices or sampled instruments, and reports measured loudness, silences, onsets, pitch-class and spectral checks. Skips cleanly without LMMS, Decent Sampler or the library. See [docs/film-personas.md](docs/film-personas.md).
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.
 - `convert_sfz` applies controller modulation at the default values (`*_onccN` for envelopes, volume, pan, tuning, offset and velocity tracking) with the standard SFZ curves, so the Salamander Grand gets its intended 73% velocity tracking and 1 second release. With `keepReleases`, release samples become Decent Sampler release groups that play when a note ends.

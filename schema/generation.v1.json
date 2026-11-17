@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LMMS MCP generation v1",
+  "type": "object",
+  "required": ["version", "id", "created", "tool", "args", "game", "seed", "style", "key", "bpm", "instruments", "plugins", "sampleLibraries", "durationSeconds", "integratedLufs", "truePeakDbfs", "files", "rating", "feedback", "locations", "publishable"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "created": { "type": "string", "format": "date-time" },
+    "tool": { "type": "string" },
+    "args": { "type": "object" },
+    "game": { "type": ["string", "null"] },
+    "seed": { "type": ["integer", "null"] },
+    "style": { "type": ["string", "null"] },
+    "key": { "type": ["string", "null"] },
+    "bpm": { "type": ["number", "null"] },
+    "instruments": { "type": "array", "items": { "type": "string" } },
+    "plugins": { "type": "array", "items": { "type": "string" } },
+    "sampleLibraries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "licence", "credit", "source"],
+        "properties": {
+          "id": { "type": "string" },
+          "licence": { "type": "string" },
+          "credit": { "type": ["string", "null"] },
+          "source": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "durationSeconds": { "type": ["number", "null"] },
+    "integratedLufs": { "type": ["number", "null"] },
+    "truePeakDbfs": { "type": ["number", "null"] },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "rating": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+    "feedback": { "type": ["string", "null"] },
+    "locations": {
+      "type": "object",
+      "required": ["local", "r2", "hf"],
+      "properties": {
+        "local": { "type": "string" },
+        "r2": { "type": ["string", "null"] },
+        "hf": { "type": ["string", "null"] }
+      }
+    },
+    "publishable": { "type": "boolean" }
+  }
+}
