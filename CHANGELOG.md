@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Add `list_personas` and `describe_persona`, plus an optional persona on `compose_piece`, `compose_batch` and `lmms-compose`.
+- Render, compose, master and export tools now record generation manifests in a local catalogue with SHA-256 deduplication, rating, and licence provenance.
 - Groove engine tools: `apply_groove` (MPC swing, UKG, house, amapiano, half-time), `humanize` (seeded timing/velocity), `add_ghost_notes`, `add_fills`, `layer_drums`. Deterministic. Operate on note arrays.
 - `arrangement_plan` generates bar-aligned section maps (intro/build/drop/breakdown/outro) with energy and role hints for house, techno, DnB and UKG. `energy_curve` extracts the envelope. Deterministic.
 - `render_vocal_syllable` generates short vocal-like syllables (a/e/i/o/u) with simple formant synthesis. `chop_vocal` slices a workspace vocal WAV into rhythmic chops. Deterministic.
@@ -26,8 +28,6 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - `scale_lock`, `arpeggiate` and `note_probability`: edits (and `apply_edits` steps) that snap a track to a named scale, turn chords into arpeggios, and drop or vary notes by seeded chance. Drum tracks are skipped unless named.
 - SoundFont rendering: `list_soundfonts` and `render_soundfont` drive FluidSynth to render a workspace MIDI through a `.sf2` or `.sf3` into a WAV. Configurable via `LMMS_FLUIDSYNTH` and optional `LMMS_SOUNDFONTS`. See docs/soundfont.md.
 - `write_loop_points`: write loop start and end into a WAV (`smpl` chunk) or OGG (`LOOPSTART`, `LOOPEND`, `LOOPLENGTH`) with a `.loop.json` sidecar, or tag a `prepare_loop` manifest's files in place.
-- Add `list_personas` and `describe_persona`, plus an optional persona on `compose_piece`, `compose_batch` and `lmms-compose`.
-- Render, compose, master and export tools now record generation manifests in a local catalogue with SHA-256 deduplication, rating, and licence provenance.
 - Add optional `groovebox_pattern`, `render_groovebox` and `load_pad_kit` tools for locally installed Atelier DSP.
 
 - `render_vst3_stems` takes a `space` for each track: a convolution reverb from a synthetic impulse response of a room, hall, church or cathedral, with its level measured against the dry sound and its own stereo width.

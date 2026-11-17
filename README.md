@@ -32,7 +32,6 @@ On connection, the server sends a short workflow brief through MCP initializatio
 
 Stem, layer and full-song renders can take a minute or more. Give your MCP client a tool timeout of at least five minutes.
 
-
 ## Drum kits
 
 Stock LMMS drum samples are grouped into ready kits, including dance-oriented ones (house, techno, trance, breaks). Call `list_drum_kits` to see which pieces are present on this machine, then `create_drum_kit` to start a project with separate tracks (kick, snare, hat, openhat, clap) ready for patterns. You can also pass the returned `factorySample` paths into `create_project` yourself.
@@ -51,8 +50,8 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Read | `inspect_project`, `inspect_arrangement`, `read_pattern` |
 | Start fast | `list_blueprints`, `create_from_blueprint`, `develop_motif` ([docs/blueprints.md](docs/blueprints.md)) |
 | Write tunes | `write_melody`, `write_accompaniment` ([docs/melody.md](docs/melody.md)) |
-| Nightly soundtrack runs | Headless recipe batches and dated listening pages ([docs/nightly.md](docs/nightly.md)) |
 | Local generation catalogue | Search, rate and backfill render and composition manifests ([docs/catalogue.md](docs/catalogue.md)) |
+| Nightly soundtrack runs | Headless recipe batches and dated listening pages ([docs/nightly.md](docs/nightly.md)) |
 | Whole pieces | `compose_piece`, `compose_batch`, and `lmms-compose` on the command line with no agent ([docs/compose.md](docs/compose.md)) |
 | Solo lines | `write_solo` |
 | DJ | `list_dj_effects`, `dj_effects`, `rearrange_audio`, `time_stretch`, `chop_break` ([break editing](docs/break-edits.md)) |
