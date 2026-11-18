@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Report EBU loudness range and stereo image in `analyze_audio`, with mono-fold and phase warnings.
+
 - Four film and game score personas: `action-score`, `horror-suspense`, `epic-fantasy` and `dark-synth-scifi`, described by sound only. The three orchestral ones name the CC0 VSCO 2 CE library by id with `articulations` keyswitch maps; `licences.json` records its source, author, licence and hashes and nothing from it is bundled. Live keyswitching waits for the SFZ keyswitch fix.
 - `scripts/personas/persona-demo.mjs` builds a reference cue for each film persona from a seed, renders it with stock LMMS voices or sampled instruments, and reports measured loudness, silences, onsets, pitch-class and spectral checks. Skips cleanly without LMMS, Decent Sampler or the library. See [docs/film-personas.md](docs/film-personas.md).
 
