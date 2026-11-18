@@ -6,6 +6,11 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Report EBU loudness range and stereo image in `analyze_audio`, with mono-fold and phase warnings.
+
+- Four film and game score personas: `action-score`, `horror-suspense`, `epic-fantasy` and `dark-synth-scifi`, described by sound only. The three orchestral ones name the CC0 VSCO 2 CE library by id with `articulations` keyswitch maps; `licences.json` records its source, author, licence and hashes and nothing from it is bundled. Live keyswitching waits for the SFZ keyswitch fix.
+- `scripts/personas/persona-demo.mjs` builds a reference cue for each film persona from a seed, renders it with stock LMMS voices or sampled instruments, and reports measured loudness, silences, onsets, pitch-class and spectral checks. Skips cleanly without LMMS, Decent Sampler or the library. See [docs/film-personas.md](docs/film-personas.md).
+
 - Add `list_personas` and `describe_persona`, plus an optional persona on `compose_piece`, `compose_batch` and `lmms-compose`.
 - Render, compose, master and export tools now record generation manifests in a local catalogue with SHA-256 deduplication, rating, and licence provenance.
 - Groove engine tools: `apply_groove` (MPC swing, UKG, house, amapiano, half-time), `humanize` (seeded timing/velocity), `add_ghost_notes`, `add_fills`, `layer_drums`. Deterministic. Operate on note arrays.
@@ -18,6 +23,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - DJ persona pack B (bass and hard): drum-and-bass, uk-garage, dubstep-bass, hardstyle-gabber, cinematic-psytrance. JSON files in `personas/`.
 - DJ persona pack C (groove and retro): g-funk, lofi-boom-bap, afro-amapiano, synthwave-outrun. JSON files in `personas/`.
 - `rank_candidates` re-ranks compose results with adjustable weights (arrangement / mix / tune). `learn_from_scores` adjusts those weights from preferred-vs-rejected listener feedback. Deterministic.
+- `publish_to_r2` promotes an approved catalogued generation to a private Cloudflare R2 bucket as immutable versioned keys (`games/<game>/<kind>/<slug>/v<N>.<ext>`) with a manifest that carries the credits, and keeps `games/<game>/index.json` for games to load. It is a dry run until `confirm: true`, never overwrites a versioned object, refuses unknown licences and missing credits, and saves the R2 location in the catalogue. `list_r2_assets` lists the bucket read only. Configuration comes from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET`. See [docs/r2.md](docs/r2.md).
 - Add optional `atelier_list_instruments`, `atelier_describe_instrument`, `atelier_render`, `atelier_process` and `atelier_notes` tools for a local atelier-instruments checkout: eleven generators, processors and note generators with strict params, 48 kHz output, and placement on a bar as a sample track.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
 

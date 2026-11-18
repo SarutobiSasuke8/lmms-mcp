@@ -1,0 +1,33 @@
+{
+  "vsco-2-ce": {
+    "licence": "CC0-1.0",
+    "author": "Sam Gossner, Versilian Studios",
+    "credit": "VSCO 2 Community Edition by Versilian Studios (Sam Gossner)",
+    "source": "https://github.com/sgossner/VSCO-2-CE/blob/SFZ/LICENSE",
+    "repository": "https://github.com/sgossner/VSCO-2-CE",
+    "ref": "SFZ branch, commit 6dd651d55dde97fd4028699be9d4481f26917891",
+    "licenceFile": "LICENSE",
+    "licenceSha256": "4d2eef679d5faf924534bcc132646322e9a852ce50ae5616694e0b95f7b8275d",
+    "bundled": false,
+    "usedBy": ["action-score", "horror-suspense", "epic-fantasy"],
+    "install": "Sparse checkout of the SFZ branch into LMMS_SAMPLE_LIBRARIES/VSCO-2-CE. The repository is never copied into this one; personas name the library by id.",
+    "files": {
+      "CelloEnsSpic.sfz": "c77710eaa192fe334ff35e35702daad6d637c82c82cd353a210c56c3a40eb8a1",
+      "ContrabassSpic.sfz": "0235a009e423309b757b41f4904cb000ac9e353996404820e8858ad51db7acf6",
+      "ContrabassSusVB.sfz": "987d80efad67eaa6f68ce96ab0672dd57553519f98a678a98c7d8bfdf52e1fa1",
+      "ViolinEnsSusVib.sfz": "242bde652b51c70437b6bc2ade293f08c7f81716c194ac369d18c0f4038b6ad2",
+      "ViolinEnsSpic.sfz": "072322425cce4271c01fdaa2512e97da78623d0869d95d9ca750eb9318e5dbb4",
+      "ViolinEnsTrem.sfz": "3ef4e7a08b782b59286db3fb5aea6d3f0c4b14358234ee124f74712316956885",
+      "ViolaEnsTrem.sfz": "2635b262e9625cf8c575e2fc404c3ca587f2e7149fa61ff1abbb23dc98000b37",
+      "TrumpetStac.sfz": "b475db4f1d4ca0abb294167c9b00f9139e21e8963b91285b2bb32300f362f4c1",
+      "TubaStac.sfz": "bb7a85afe17ccf1de875b561dea3523ba87036886ae3fd03876319d4ab468e2d",
+      "Timpani.sfz": "8df911e2ea40244a8a2fc39ec38762872b1123a1621c3bd9ef797ae2f7c155d3",
+      "SViolinTrem.sfz": "6516c9b73c4ffaed328b3e27a581afbdb21cb16f6f954e068ed207a25d746360",
+      "SViolinPizz.sfz": "6c0e5397cce44917094c8b001ca1668819be367d4350532ed7121d5a371c0d1a",
+      "FHornSus.sfz": "f60fc92af5c95b986068bd02b91efd4a146554fe99e4e447de553a25a196d6ac",
+      "Harp.sfz": "f18ae9cc18acae4da95e740c559d6ca30134dd061b80ab4e98bc4eb1b27ee740",
+      "FluteStac.sfz": "b7c58dafab3ce35eebdc4a3942e603841e5f9dbda8449ea5a7af2f2678d8aed7",
+      "ClarinetStac.sfz": "8329356d5c228589c05adb6194cfce828cab0573ccabcdadf1aa94d7fa5f3170"
+    }
+  }
+}

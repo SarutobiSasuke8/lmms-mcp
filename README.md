@@ -8,7 +8,7 @@ Write game music with an AI agent and get engine-ready files back. The agent com
 
 Use `list_personas` to filter repository persona data by kind, tags, tempo range or search text. `describe_persona` returns the full brief and references. Pass the ID as `persona` to `compose_piece` or `compose_batch`, or use `lmms-compose --persona <id>` once the data file is installed.
 
-Persona files live in `personas/` and follow `personas/persona.schema.json`. Explicit tempo, key, style and voice arguments override the corresponding defaults. The current composer uses native sound fallbacks, 4/4, and its existing form. It applies the persona’s phrase length, compatible drum/bass patterns, swing, harmony, and the loudness and peak settings supported by the stock renderer. Other groove, arrangement, instrument and mix references are available through `describe_persona` for the corresponding engines to consume. Persona data ships separately.
+Persona files live in `personas/` and follow `personas/persona.schema.json`. Explicit tempo, key, style and voice arguments override the corresponding defaults. The current composer uses native sound fallbacks, 4/4, and its existing form. It applies the persona’s phrase length, compatible drum/bass patterns, swing, harmony, and the loudness and peak settings supported by the stock renderer. Other groove, arrangement, instrument and mix references are available through `describe_persona` for the corresponding engines to consume. Four film and game score personas ship in `personas/`: see [docs/film-personas.md](docs/film-personas.md).
 
 ## Windows setup
 
@@ -51,6 +51,7 @@ The saved-project tools work with stock LMMS. Claude's game-audio suite added ch
 | Start fast | `list_blueprints`, `create_from_blueprint`, `develop_motif` ([docs/blueprints.md](docs/blueprints.md)) |
 | Write tunes | `write_melody`, `write_accompaniment` ([docs/melody.md](docs/melody.md)) |
 | Local generation catalogue | Search, rate and backfill render and composition manifests ([docs/catalogue.md](docs/catalogue.md)) |
+| Publish approved generations to R2 | `publish_to_r2` (dry run by default), `list_r2_assets` ([docs/r2.md](docs/r2.md)) |
 | Nightly soundtrack runs | Headless recipe batches and dated listening pages ([docs/nightly.md](docs/nightly.md)) |
 | Whole pieces | `compose_piece`, `compose_batch`, and `lmms-compose` on the command line with no agent ([docs/compose.md](docs/compose.md)) |
 | Solo lines | `write_solo` |
@@ -130,7 +131,7 @@ Volumes accept fractions. `automate_track` covers volume, pan, pitch, filter cut
 
 ## Listening by measurement
 
-An agent cannot hear. `analyze_audio` reports what it needs to judge a mix: integrated loudness in LUFS (ITU-R BS.1770), true peak, RMS, crest factor, clipped samples, DC offset, stereo correlation, energy in six frequency bands, spectral centroid and the loop seam. Give it `sections` in bars to compare parts of a song, `pitch: true` to detect notes, and `spectrogram` to get a PNG returned as an image. It ends with plain-language warnings, for example a section that will thin out in mono.
+An agent cannot hear. `analyze_audio` reports what it needs to judge a mix: integrated loudness in LUFS (ITU-R BS.1770), true peak, RMS, crest factor, clipped samples, DC offset, loudness range (`lraLu`), stereo correlation, stereo image (including worst-window correlation and mono-fold loss), energy in six frequency bands, spectral centroid and the loop seam. Give it `sections` in bars to compare parts of a song, `pitch: true` to detect notes, and `spectrogram` to get a PNG returned as an image. It ends with plain-language warnings, for example a section that will thin out in mono.
 
 `render_mix` reports loudness and true peak with every render. Options:
 
