@@ -114,7 +114,19 @@ const track = z.object({
 // What a track is for in the arrangement. Stored on the track so lint, balance and export tools can read it.
 const roleNames = ['drums', 'bass', 'harmony', 'lead', 'counter', 'texture', 'fx'];
 const trackRole = t => roleNames.includes(t.getAttribute('mcp-role')) ? t.getAttribute('mcp-role') : null;
-const kit = { kick: 'kick_soft01', clap: 'clap01', hat: 'hihat_closed01' };
+const kits = {
+  soft: { kick: 'kick_soft01', snare: 'snare01', hat: 'hihat_closed01', clap: 'clap01' },
+  tight: { kick: 'kick01', snare: 'snare02', hat: 'hihat_closed02', clap: 'clap02' },
+  electronic: { kick: 'kick01', snare: 'snare_electro01', hat: 'hihat_closed01', clap: 'clap01' },
+  acoustic: { kick: 'bassdrum_acoustic01', snare: 'snare_acoustic01', hat: 'hihat_opened01', clap: 'clap01' },
+  // Dance-oriented kits using common LMMS factory samples
+  house: { kick: 'kick01', snare: 'snare01', hat: 'hihat_closed01', openhat: 'hihat_opened01', clap: 'clap01' },
+  techno: { kick: 'kick_hard01', snare: 'snare_harsh01', hat: 'hihat_closed03', openhat: 'hihat_opened01', clap: 'clap02' },
+  trance: { kick: 'kick02', snare: 'snare02', hat: 'hihat_closed02', openhat: 'hihat_opened01', clap: 'clap01' },
+  breaks: { kick: 'kick_soft01', snare: 'snare01', hat: 'hihat_closed01', openhat: 'hihat_opened01', clap: 'clap01' },
+};
+const kit = kits.soft; // default for the existing kick/clap/hat voices
+
 const tones = {
   pluck: { waves: [1, 2, 0], gains: [33, 14, 18], cutoff: 3400, sustain: .24, decay: .22, release: .075 },
   bass: { waves: [2, 0, 1], gains: [30, 44, 0], cutoff: 820, sustain: .72, decay: .24, release: .05 },
@@ -207,9 +219,12 @@ function addPattern(target, part) {
   const ticks = part.bars * 192;
   const notes = expandPattern(part);
   if (notes.some(n => n.tick + n.length > ticks)) throw new Error('Note extends beyond pattern');
-  const clip = add(target, 'pattern', { name: part.name, pos: part.bar * 192, len: ticks, type: 1, steps: 16, muted: 0 });
+  const clip = addPatternClip(target, part);
   for (const n of notes) add(clip, 'note', { key: n.midi - 12, pos: n.tick, len: n.length, vol: n.velocity, pan: 0 });
   return clip;
+}
+function addPatternClip(target, { name, bar, bars }) {
+  return add(target, 'pattern', { name, pos: bar * 192, len: bars * 192, type: 1, steps: 16, muted: 0 });
 }
 async function checkTrack(item) {
   if (item.voice === 'sample') {
@@ -263,7 +278,13 @@ const generations = generationStore(root, {
     const doc = await load(name);
     const instruments = Array.from(doc.getElementsByTagName('instrument')).map(node => node.getAttribute('name')).filter(Boolean);
     const plugins = Array.from(doc.getElementsByTagName('effect')).map(node => node.getAttribute('name')).filter(Boolean);
-    return { bpm: songInfo(doc).bpm, instruments, plugins };
+    const usesFactoryDrums = Array.from(doc.getElementsByTagName('audiofileprocessor')).some(node => {
+      const source = node.getAttribute('src')?.replaceAll('\\', '/');
+      if (!source) return false;
+      const relative = path.isAbsolute(source) ? path.relative(samplesDirectory, source).replaceAll('\\', '/') : source;
+      return /^drums\//i.test(relative);
+    });
+    return { bpm: songInfo(doc).bpm, instruments, plugins, usesFactoryDrums };
   },
 });
 
@@ -999,6 +1020,49 @@ tool('list_samples', 'Browse the stock LMMS sample library (drums, basses, instr
     tokens.every(token => name.toLowerCase().includes(token))).sort();
   return { groups, total: matches.length, samples: matches.slice(0, limit) };
 });
+tool('list_drum_kits', 'List available stock drum kits built from LMMS factory samples. Each kit provides kick, snare, hat and clap paths.', {}, async () => {
+  const available = {};
+  for (const [name, pieces] of Object.entries(kits)) {
+    available[name] = {};
+    for (const [piece, file] of Object.entries(pieces)) {
+      const full = path.join(samplesDirectory, 'drums', file + '.ogg');
+      available[name][piece] = existsSync(full) ? `drums/${file}.ogg` : null;
+    }
+  }
+  return { kits: available, licence: 'GPL-2.0-or-later', publishable: false,
+    note: 'Stock kits are for local use. Use create_drum_kit or pass the factorySample paths to create_project with voice "sample".' };
+});
+
+tool('create_drum_kit', 'Create a new LMMS project containing a ready-to-use drum kit (separate tracks for kick, snare, hat, clap). Patterns are empty so the agent can fill them with step grids or notes.', {
+  output: projectName,
+  kit: z.enum(Object.keys(kits)).default('soft'),
+  bpm: z.number().min(45).max(240).default(120),
+  lengthBars: z.number().int().min(1).max(64).default(8),
+  masterVolume: volume.default(86),
+}, async ({ output, kit: kitName, bpm, lengthBars, masterVolume }) => {
+  const chosen = kits[kitName];
+  const items = [];
+  const volumes = { kick: 92, snare: 78, hat: 62, openhat: 58, clap: 70 };
+  const pans = { hat: 22, openhat: -18, clap: 8 };
+  for (const [piece, file] of Object.entries(chosen)) {
+    items.push({
+      name: piece,
+      voice: 'sample',
+      factorySample: `drums/${file}.ogg`,
+      role: 'drums',
+      volume: volumes[piece] ?? 70,
+      pan: pans[piece] ?? 0,
+      patterns: [],
+    });
+  }
+  for (const item of items) await checkTrack(item);
+  const doc = createSong(bpm, items, masterVolume);
+  for (const track of tracks(doc)) addPatternClip(track, { name: track.getAttribute('name'), bar: 0, bars: lengthBars });
+  if (lengthBars > songInfo(doc).lengthBars) setAnchor(doc, lengthBars);
+  return { ...(await save(doc, output)), kit: kitName, tracks: items.map(item => item.name), lengthBars,
+    licence: 'GPL-2.0-or-later', publishable: false };
+});
+
 
 // Measured facts about factory sounds: level, tuning, envelope and brightness. A copy for stock LMMS 1.2.2 ships
 // with the server; build_sound_catalogue adds or refreshes entries in the workspace.

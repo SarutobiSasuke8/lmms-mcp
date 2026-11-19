@@ -26,11 +26,10 @@ test('the four film personas validate and list with the tempo ranges and default
     assert.equal(kind, 'film');
     assert.ok(testRender.seconds >= 30 && testRender.seconds <= 60, `${id} demo length`);
   }
-  assert.deepEqual(loadPersonas().map(persona => persona.id).sort(), ids);
+  assert.deepEqual(loadPersonas().filter(persona => persona.kind === 'film').map(persona => persona.id).sort(), ids);
   assert.deepEqual(listPersonas({ kind: 'film' }).map(persona => persona.id).sort(), ids);
-  assert.deepEqual(listPersonas({ kind: 'dj' }), []);
-  assert.deepEqual(listPersonas({ minBpm: 135, maxBpm: 140 }).map(persona => persona.id), ['action-score']);
-  assert.deepEqual(listPersonas({ tags: ['horror'] }).map(persona => persona.id), ['horror-suspense']);
+  assert.deepEqual(listPersonas({ kind: 'film', minBpm: 135, maxBpm: 140 }).map(persona => persona.id), ['action-score']);
+  assert.deepEqual(listPersonas({ kind: 'film', tags: ['horror'] }).map(persona => persona.id), ['horror-suspense']);
 });
 
 test('persona text names no artist, composer, film or label', () => {

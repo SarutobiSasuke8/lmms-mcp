@@ -8,6 +8,7 @@ const unknown = { id: 'unverified-input', licence: 'unknown', credit: null, sour
 const sha = value => createHash('sha256').update(value).digest('hex');
 const finite = value => Number.isFinite(value) ? value : null;
 const allowed = new Set(['CC0-1.0', 'CC-BY-3.0', 'CC-BY-4.0', 'MIT']);
+const factoryDrums = 'lmms-factory-drums';
 
 async function regularFile(root, filename) {
   const full = await realpath(path.resolve(root, filename));
@@ -30,7 +31,8 @@ function outputs(tool, args, result) {
   const entry = (files, facts = result, options = args) => ({ files, facts, options });
   const inFolder = filename => path.join(result.directory ?? args.outputDirectory, filename);
   switch (tool) {
-    case 'compose_piece': return [entry([result.project])];
+    case 'compose_piece':
+    case 'create_drum_kit': return [entry([result.project])];
     case 'compose_batch':
       return result.ranking.map(candidate => entry([candidate.audio, candidate.project], candidate, {
         ...args, seed: candidate.seed,
@@ -107,11 +109,17 @@ export function generationStore(workspace, { measure, describeProject } = {}) {
         return { path: name, sha256: null };
       }
     }));
-    const id = sha(JSON.stringify({ tool, args, files, inputs, sources }));
-    const existing = (await records()).get(id);
-    if (existing) return existing;
-    const project = facts.project ?? args.project;
+    const index = await records();
+    const project = facts.project ?? args.project ?? names.find(name => /\.mmpz?$/i.test(name));
     const details = project && describeProject ? await describeProject(project).catch(() => ({})) : {};
+    const hashes = new Set([...files, ...inputs].map(file => file.sha256).filter(Boolean));
+    const inheritsDrums = [...index.values()].some(record =>
+      record.sampleLibraries.some(library => library.id === factoryDrums)
+      && record.files.some(file => hashes.has(file.sha256)));
+    if (details.usesFactoryDrums || inheritsDrums) sources = [...new Set([...(sources ?? []), factoryDrums])];
+    const id = sha(JSON.stringify({ tool, args, files, inputs, sources }));
+    const existing = index.get(id);
+    if (existing) return existing;
     const wav = files.find(file => file.path.endsWith('/mix.wav')) ?? files.find(file => /\.wav$/i.test(file.path));
     const analysis = wav && measure ? await measure(path.join(root, wav.path)).catch(() => ({})) : {};
     const sampleLibraries = sources?.map(source => ({ id: source, ...registry[source] })) ?? [unknown];

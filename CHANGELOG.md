@@ -13,6 +13,16 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 - Add `list_personas` and `describe_persona`, plus an optional persona on `compose_piece`, `compose_batch` and `lmms-compose`.
 - Render, compose, master and export tools now record generation manifests in a local catalogue with SHA-256 deduplication, rating, and licence provenance.
+- Groove engine tools: `apply_groove` (MPC swing, UKG, house, amapiano, half-time), `humanize` (seeded timing/velocity), `add_ghost_notes`, `add_fills`, `layer_drums`. Deterministic. Operate on note arrays.
+- `arrangement_plan` generates bar-aligned section maps (intro/build/drop/breakdown/outro) with energy and role hints for house, techno, DnB and UKG. `energy_curve` extracts the envelope. Deterministic.
+- `render_vocal_syllable` generates short vocal-like syllables (a/e/i/o/u) with simple formant synthesis. `chop_vocal` slices a workspace vocal WAV into rhythmic chops. Deterministic.
+- The composer loads its styles from `tools/styles.json`, including reggae, dub and dubstep.
+- `fatten` applies a per-sound design chain (unison/doubler, saturation, OTT-style 3-band compression, chorus, EQ tilt, stereo width with mono lows). Presets: fat lead, huge pad, reese grit, punchy kick, wide hats, dirty 808.
+- `layer_sounds` stacks 2–4 WAVs with gain matching. Both are additive to existing mix tools.
+- DJ persona pack A (club): dutch-trance, french-filter-house, carnival-party-house, chicago-acid, detroit-berlin-techno. JSON files in `personas/` ready for the persona loader.
+- DJ persona pack B (bass and hard): drum-and-bass, uk-garage, dubstep-bass, hardstyle-gabber, cinematic-psytrance. JSON files in `personas/`.
+- DJ persona pack C (groove and retro): g-funk, lofi-boom-bap, afro-amapiano, synthwave-outrun. JSON files in `personas/`.
+- `rank_candidates` re-ranks compose results with adjustable weights (arrangement / mix / tune). `learn_from_scores` adjusts those weights from preferred-vs-rejected listener feedback. Deterministic.
 - `publish_to_r2` promotes an approved catalogued generation to a private Cloudflare R2 bucket as immutable versioned keys (`games/<game>/<kind>/<slug>/v<N>.<ext>`) with a manifest that carries the credits, and keeps `games/<game>/index.json` for games to load. It is a dry run until `confirm: true`, never overwrites a versioned object, refuses unknown licences and missing credits, and saves the R2 location in the catalogue. `list_r2_assets` lists the bucket read only. Configuration comes from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET`. See [docs/r2.md](docs/r2.md).
 - Add optional `atelier_list_instruments`, `atelier_describe_instrument`, `atelier_render`, `atelier_process` and `atelier_notes` tools for a local atelier-instruments checkout: eleven generators, processors and note generators with strict params, 48 kHz output, and placement on a bar as a sample track.
 - Add optional `render_pedal_chain` for stereo WAV effects, saved Atelier board presets and timed wah sweeps.
@@ -41,6 +51,9 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - `setup-libraries-windows.ps1` fetches the Salamander Grand Piano (CC BY 3.0, about 720 MB) as the default piano. The Splendid Grand is still available with `-Only splendid`.
 
 ### Fixed
+
+- Dance tools accept workspace WAV names, honour requested arrangement lengths, apply 3:2 clave and half-time backbeats, and normalise partial ranking weights.
+- DJ presets follow the persona schema. Stock drum kits use valid sample names, report missing files, and carry local-only licence provenance through the catalogue.
 
 - Decent Sampler no longer renders silence after a preset is set: the worker polls the plug-in's state until the new preset is applied (Decent Sampler applies it on a background thread) before it plays the sound check.
 - Loops that start with a drum hit are no longer flagged as clicking at the loop join. `analyze` reports `loop.boundaryStepDbfs`, and the warning fires only when the join jumps more than 6 dB above the step between neighbouring samples.
