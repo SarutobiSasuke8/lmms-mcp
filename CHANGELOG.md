@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Report TT-style dynamic range in audio analysis and flag masters below DR6.
+
 - Report EBU loudness range and stereo image in `analyze_audio`, with mono-fold and phase warnings.
 
 - Four film and game score personas: `action-score`, `horror-suspense`, `epic-fantasy` and `dark-synth-scifi`, described by sound only. The three orchestral ones name the CC0 VSCO 2 CE library by id with `articulations` keyswitch maps; `licences.json` records its source, author, licence and hashes and nothing from it is bundled. Live keyswitching waits for the SFZ keyswitch fix.
