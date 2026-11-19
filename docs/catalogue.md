@@ -24,7 +24,7 @@ the actual inputs in a dedicated folder, pass `verifiedLibraries` to
 libraries declared by the operator and is not approval to upload or release.
 Sample-free instrument output can also lack provenance. The registry's Surge
 XT entry describes the plugin, not independent clearance of any loaded
-samples or presets. Location fields for R2 and Hugging Face are reserved.
+samples or presets. The R2 location is written by `publish_to_r2` (see [r2.md](r2.md)) as an appended index event, so the sidecar keeps the initial record. The Hugging Face location is still reserved.
 
 Sidecars preserve the initial record. The append-only index records later
 ratings. Paths are relative to the workspace. Keep their files with the

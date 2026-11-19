@@ -13,6 +13,22 @@ function tone(hz, seconds, level = 0.5, channels = 2) {
   return { sampleRate, frames, channels: Array.from({ length: channels }, () => data.slice()) };
 }
 
+test('analyze reports loudness range and mono cancellation', () => {
+  const high = 10 ** (-20 / 20);
+  const low = 10 ** (-30 / 20);
+  const frames = sampleRate * 40;
+  const left = Float32Array.from({ length: frames }, (_, i) =>
+    (i < sampleRate * 20 ? high : low) * Math.sin(2 * Math.PI * 997 * i / sampleRate));
+  const right = left.map(sample => -sample);
+  const report = dsp.analyze({ sampleRate, frames, channels: [left, right] });
+  assert.ok(Math.abs(report.lraLu - 10) <= 1, `Expected 10 LU, got ${report.lraLu}`);
+  assert.equal(report.stereoCorrelation, -1);
+  assert.equal(report.stereo.monoCancels, true);
+  const warnings = dsp.advise(report);
+  assert.ok(warnings.some(warning => warning.includes('folded to mono')));
+  assert.ok(warnings.some(warning => warning.includes('opposing left and right phase')));
+});
+
 test('WAV round trip keeps length and level', () => {
   const audio = tone(440, 0.5);
   const decoded = dsp.decodeWav(dsp.encodeWav(audio));
