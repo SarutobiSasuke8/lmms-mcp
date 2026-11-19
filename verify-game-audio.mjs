@@ -212,6 +212,7 @@ try {
   const drums = await call('list_samples', { group: 'drums', query: 'snare' });
   assert.ok(drums.total >= 10 && drums.samples.every(name => name.startsWith('drums/')));
   const built = await call('build_sound_catalogue', { limit: 3, refresh: true });
+  assert.deepEqual(built.failed, [], `Sound catalogue preset failures: ${JSON.stringify(built.failed)}`);
   assert.equal(built.measured, 3);
   const basses = await call('search_sounds', { role: 'bass', engine: 'lmms' });
   assert.ok(basses.total > 5 && basses.sounds.every(sound => sound.role === 'bass'));
