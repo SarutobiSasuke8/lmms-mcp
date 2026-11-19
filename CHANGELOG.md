@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Groove tools can write MIDI and LMMS projects, extract timing from MIDI, and apply declared-tempo timing jitter.
+
 - Report EBU loudness range and stereo image in `analyze_audio`, with mono-fold and phase warnings.
 
 - Four film and game score personas: `action-score`, `horror-suspense`, `epic-fantasy` and `dark-synth-scifi`, described by sound only. The three orchestral ones name the CC0 VSCO 2 CE library by id with `articulations` keyswitch maps; `licences.json` records its source, author, licence and hashes and nothing from it is bundled. Live keyswitching waits for the SFZ keyswitch fix.
@@ -18,7 +20,7 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 - `render_vocal_syllable` generates short vocal-like syllables (a/e/i/o/u) with simple formant synthesis. `chop_vocal` slices a workspace vocal WAV into rhythmic chops. Deterministic.
 - The composer loads its styles from `tools/styles.json`, including reggae, dub and dubstep.
 - `fatten` applies a per-sound design chain (unison/doubler, saturation, OTT-style 3-band compression, chorus, EQ tilt, stereo width with mono lows). Presets: fat lead, huge pad, reese grit, punchy kick, wide hats, dirty 808.
-- `layer_sounds` stacks 2–4 WAVs with gain matching. Both are additive to existing mix tools.
+- `layer_sounds` stacks 2â€“4 WAVs with gain matching. Both are additive to existing mix tools.
 - DJ persona pack A (club): dutch-trance, french-filter-house, carnival-party-house, chicago-acid, detroit-berlin-techno. JSON files in `personas/` ready for the persona loader.
 - DJ persona pack B (bass and hard): drum-and-bass, uk-garage, dubstep-bass, hardstyle-gabber, cinematic-psytrance. JSON files in `personas/`.
 - DJ persona pack C (groove and retro): g-funk, lofi-boom-bap, afro-amapiano, synthwave-outrun. JSON files in `personas/`.
