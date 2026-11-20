@@ -133,6 +133,8 @@ Volumes accept fractions. `automate_track` covers volume, pan, pitch, filter cut
 
 An agent cannot hear. `analyze_audio` reports what it needs to judge a mix: integrated loudness in LUFS (ITU-R BS.1770), true peak, RMS, crest factor, clipped samples, DC offset, loudness range (`lraLu`), TT-style dynamic range (`dynamicRange`, with DR, mean, per-channel values and block count), stereo correlation, stereo image (including worst-window correlation and mono-fold loss), energy in six frequency bands, spectral centroid and the loop seam. Give it `sections` in bars to compare parts of a song, `pitch: true` to detect notes, and `spectrogram` to get a PNG returned as an image. It ends with plain-language warnings, for example a section that will thin out in mono.
 
+Analysis also reports `tempo: { bpm, confidence }`. The JavaScript `analyze()` helper accepts `expectedBpm` to add `tempo.expectedBpm` and `tempo.match`, allowing a 1 BPM difference at the requested, half or double tempo; an undetectable tempo gives `match: null`. Compose-batch checks its known project BPM and warns on a mismatch.
+
 `render_mix` reports loudness and true peak with every render. Options:
 
 - `tail: "wrap"` folds the reverb and delay tail back onto the start, so a loop does not cut its own echoes. `tail: "keep"` lets the tail ring out.

@@ -4,6 +4,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+- Add tempo estimates to audio analysis, optional expected-BPM checks with octave tolerance, and compose-batch tempo warnings.
+
 ### Added
 
 - Groove tools can write MIDI and LMMS projects, extract timing from MIDI, and apply declared-tempo timing jitter.
