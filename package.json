@@ -1,5 +1,6 @@
 {
   "name": "@sarutobi-sasuke/lmms-mcp",
+  "mcpName": "io.github.SarutobiSasuke8/lmms-mcp",
   "version": "0.9.1",
   "description": "MCP server that lets an AI agent compose, mix, measure and export game music with stock LMMS 1.2.2",
   "keywords": [
