@@ -4,6 +4,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+- Add tempo estimates to audio analysis, optional expected-BPM checks with octave tolerance, and compose-batch tempo warnings.
+
 ### Added
 
 - Add `synth_drums`, `fetch_kit`, `build_kit`, `layer_drum` and `tune_drum` for original one-shots, pinned CC0 samples and mapped percussion kits.
