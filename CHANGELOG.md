@@ -6,6 +6,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ### Added
 
+- Groove tools can write MIDI and LMMS projects, extract timing from MIDI, and apply declared-tempo timing jitter.
+
 - Add `synth_drums`, `fetch_kit`, `build_kit`, `layer_drum` and `tune_drum` for original one-shots, pinned CC0 samples and mapped percussion kits.
 
 - Report TT-style dynamic range in audio analysis and flag masters below DR6.
