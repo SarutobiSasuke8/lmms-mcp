@@ -439,7 +439,7 @@ export function register({ tool, z, dsp, root, schemas, project, render, moduleG
       const ceiling = ceilingDb ?? piece.mix?.ceilingDb ?? -1.5;
       const { wav } = await render.renderMix(doc, { tail: 'keep', targetLufs: loudness, ceilingDb: ceiling });
       await render.writeAudio(path.join(root, file + '.wav'), wav);
-      const report = dsp.analyze(dsp.decodeWav(await readFile(path.join(root, file + '.wav'))), { expectedBpm: piece.bpm });
+      const report = dsp.analyze(dsp.decodeWav(await readFile(path.join(root, file + '.wav'))), { expectedBpm: piece.bpm, expectedKey: piece.key });
       const warnings = dsp.advise(report, { targetLufs: loudness });
       const quality = qualityScore(lint, { audioWarnings: warnings, silent: report.integratedLufs === null });
       results.push({ seed, project: file + '.mmp', audio: file + '.wav', key: piece.key, form: piece.form, score: Math.max(0, Math.round(quality.score * 0.5 + piece.tune.score * 0.5) - 6 * piece.structure.warnings.length),
