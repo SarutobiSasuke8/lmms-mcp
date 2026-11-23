@@ -4,6 +4,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+- Add key and Camelot estimates, optional requested-key compatibility checks, and compose-batch key warnings.
+
 - Add tempo estimates to audio analysis, optional expected-BPM checks with octave tolerance, and compose-batch tempo warnings.
 
 ### Added
