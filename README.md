@@ -135,6 +135,8 @@ An agent cannot hear. `analyze_audio` reports what it needs to judge a mix: inte
 
 Analysis reports `key: { key, tonic, mode, camelot, confidence, margin }`. The JavaScript `analyze()` helper accepts `expectedKey` as a major/minor key name or Camelot code, adding `expectedCamelot`, `match` and harmonic `compatible` checks (null for undetectable keys). Compose-batch passes its project key and warns on incompatible results.
 
+Analysis reports `rhythm: { onsetCount, density, meanIoi, swing, offbeats }` (density in onsets/second, mean interval in seconds). The JavaScript `analyze()` helper accepts `expectedSwing` as a positive finite ratio, `"straight"` (1) or `"triplet"` (2), adding `expectedSwing` and `swingMatch` with a 0.25 tolerance. Undetectable swing gives null. Swing uses the requested BPM when supplied, otherwise the tempo estimate. Mismatches add a groove warning.
+
 Analysis also reports `tempo: { bpm, confidence }`. The JavaScript `analyze()` helper accepts `expectedBpm` to add `tempo.expectedBpm` and `tempo.match`, allowing a 1 BPM difference at the requested, half or double tempo; an undetectable tempo gives `match: null`. Compose-batch checks its known project BPM and warns on a mismatch.
 
 `render_mix` reports loudness and true peak with every render. Options:
