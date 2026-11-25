@@ -968,13 +968,18 @@ const section = z.object({ name: z.string().min(1).max(60), startBar: z.number()
   startSeconds: z.number().min(0).optional(), endSeconds: z.number().min(0).optional() });
 const pngName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}\.png$/i);
 tool('analyze_audio', 'Measure a workspace WAV so you can judge a mix without hearing it: integrated loudness (LUFS), true peak, RMS, crest, clipping, DC, stereo correlation, energy in six frequency bands, spectral centroid, loop seam, optional per-section levels and pitch, plus plain-language warnings. Can return a spectrogram image.', {
-  audio: workspaceWav, bpm: z.number().min(20).max(400).optional().describe('Needed when sections are given in bars.'),
+  audio: workspaceWav, referencePath: workspaceWav.optional().describe('Optional workspace WAV for reference-track comparison.'), bpm: z.number().min(20).max(400).optional().describe('Needed when sections are given in bars.'),
   sections: z.array(section).max(64).default([]), pitch: z.boolean().default(false),
   loop: z.boolean().default(false).describe('Check the file as a loop.'), targetLufs: loudnessTarget,
   spectrogram: pngName.optional().describe('Also write this PNG to the workspace and return it as an image.'),
-}, async ({ audio: file, bpm, sections, pitch, loop, targetLufs, spectrogram }) => {
+}, async ({ audio: file, referencePath, bpm, sections, pitch, loop, targetLufs, spectrogram }) => {
   if (spectrogram && existsSync(path.join(root, spectrogram))) throw new Error('Spectrogram output already exists');
   const audio = dsp.decodeWav(await readFile(path.join(root, file)));
+  let reference;
+  if (referencePath !== undefined) {
+    try { reference = dsp.decodeWav(await readFile(path.join(root, referencePath))); }
+    catch (error) { throw new Error(`Cannot read reference WAV "${referencePath}": ${error.message}`); }
+  }
   const spans = sections.map(({ name, startBar, bars, startSeconds, endSeconds }) => {
     if (startBar !== undefined) {
       if (!bpm) throw new Error('Pass bpm to describe sections in bars');
@@ -983,7 +988,7 @@ tool('analyze_audio', 'Measure a workspace WAV so you can judge a mix without he
     if (startSeconds === undefined || endSeconds === undefined || endSeconds <= startSeconds) throw new Error(`Section "${name}" needs startBar, or startSeconds and endSeconds`);
     return { name, startSeconds, endSeconds };
   });
-  const report = dsp.analyze(audio, { sections: spans, pitch });
+  const report = dsp.analyze(audio, { sections: spans, pitch, reference });
   const result = { audio: file, ...report, warnings: dsp.advise(report, { loop, targetLufs }) };
   if (spectrogram) {
     const png = dsp.spectrogramPng(audio);

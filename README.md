@@ -336,3 +336,5 @@ Run `node demo.mjs output/japanese --japanese` for a Japanese-inspired take with
 ## Licence
 
 The bridge is MIT licensed. LMMS is separately distributed under its upstream licence.
+
+`analyze_audio` accepts an optional workspace WAV `referencePath`. The JavaScript `analyze(audio, { reference })` helper accepts decoded audio. Only when supplied, `referenceMatch` reports RMS level-match gain, six band deltas, worst band, spectral slope delta and stereo width delta; silent measurements give nulls. Level and band differences of at least 3 dB add targeted warnings.
