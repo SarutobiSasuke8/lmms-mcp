@@ -4,6 +4,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+- Add tempo-grid bar-energy curves, peak bar, range and drop positions to audio analysis, with two targeted arrangement warnings.
+
 - Add optional reference-track analysis: band, slope and width deltas, RMS level-match gain and targeted advice; `analyze_audio` accepts a workspace `referencePath` WAV.
 
 - Add onset density, mean inter-onset interval and swing ratio to audio analysis, with optional requested-swing checks and groove advice.
