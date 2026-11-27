@@ -4,6 +4,8 @@ Tool changes that can affect an agent's saved workflow are listed here. The layo
 
 ## Unreleased
 
+- Add beat-folded sidechain pump depth and dip position to audio analysis, with a targeted mid-beat trigger warning.
+
 - Add tempo-grid bar-energy curves, peak bar, range and drop positions to audio analysis, with two targeted arrangement warnings.
 
 - Add optional reference-track analysis: band, slope and width deltas, RMS level-match gain and targeted advice; `analyze_audio` accepts a workspace `referencePath` WAV.
